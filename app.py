@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import uuid4
 
 from config.settings import Settings, load_settings
 from graph.builder import build_graph
@@ -11,6 +12,7 @@ from schemas.state import (
     SWOTState,
     TopicResearchState,
 )
+from utils.logging import configure_langsmith
 
 
 def _build_default_section_drafts() -> dict[str, SectionDraft]:
@@ -138,6 +140,10 @@ def build_initial_state(
 
 def main() -> None:
     settings = load_settings()
+    configure_langsmith(
+        settings.langsmith_project,
+        enabled=settings.langsmith_enabled,
+    )
     example_query = (
         "전기차 캐즘 환경에서 LG에너지솔루션과 CATL의 포트폴리오 다각화 전략을 비교 분석해줘."
     )
@@ -153,12 +159,28 @@ def main() -> None:
         print(f"[placeholder] Initial state ready for query: {initial_state['user_query']}")
         return
 
+    result = graph.invoke(
+        initial_state,
+        config={
+            "recursion_limit": 30,
+            "configurable": {"thread_id": f"battery-strategy-{uuid4().hex[:8]}"},
+        },
+    )
+
     print("Graph compiled successfully.")
     print(f"Initial phase: {initial_state['runtime']['current_phase']}")
-    print(f"Example graph object: {type(graph).__name__}")
-    print("TODO: wire an LLM provider and retrieval backends before calling graph.invoke.")
-    # Example only:
-    # result = graph.invoke(initial_state, config={"configurable": {"thread_id": "demo"}})
+    print(f"Final phase: {result['runtime']['current_phase']}")
+    print(f"Revision count: {result['runtime']['revision_count']}")
+    print(f"Plan steps: {len(result['plan'])}")
+    print(f"Validation issues: {len(result['validation_issues'])}")
+    print(f"Messages collected: {len(result['messages'])}")
+    if result["plan"]:
+        print("Planned workflow:")
+        for index, step in enumerate(result["plan"], start=1):
+            print(f"{index}. {step}")
+    if result["messages"]:
+        print("Last message:")
+        print(result["messages"][-1]["content"])
 
 
 if __name__ == "__main__":

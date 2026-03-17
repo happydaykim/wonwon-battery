@@ -20,6 +20,8 @@ class Settings:
     data_dir: Path
     outputs_dir: Path
     prompts_dir: Path
+    langsmith_enabled: bool
+    langsmith_project: str
     llm_provider: str
     llm_model: str
     embedding_model: str
@@ -47,6 +49,8 @@ def load_settings() -> Settings:
         data_dir=data_dir,
         outputs_dir=outputs_dir,
         prompts_dir=prompts_dir,
+        langsmith_enabled=os.getenv("LANGSMITH_ENABLED", "true").lower() == "true",
+        langsmith_project=os.getenv("LANGSMITH_PROJECT", "battery-strategy-agent"),
         llm_provider=os.getenv("LLM_PROVIDER", "openai"),
         llm_model=os.getenv("LLM_MODEL", "TODO-model-name"),
         embedding_model=os.getenv("EMBEDDING_MODEL", "Qwen3-Embedding-0.6B"),
