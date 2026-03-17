@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
@@ -156,6 +158,24 @@ def build_initial_state(
     }
 
 
+def _write_final_report_markdown(
+    result: ReportState,
+    *,
+    settings: Settings,
+    thread_id: str,
+) -> Path | None:
+    """Persist the final report as a Markdown file when available."""
+    final_report = result.get("final_report")
+    if not final_report:
+        return None
+
+    settings.outputs_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = settings.outputs_dir / f"{thread_id}_{timestamp}.md"
+    report_path.write_text(final_report.rstrip() + "\n", encoding="utf-8")
+    return report_path
+
+
 def main() -> None:
     settings = load_settings()
     configure_langsmith(
@@ -177,12 +197,18 @@ def main() -> None:
         print(f"[placeholder] Initial state ready for query: {initial_state['user_query']}")
         return
 
+    thread_id = f"battery-strategy-{uuid4().hex[:8]}"
     result = graph.invoke(
         initial_state,
         config={
             "recursion_limit": 30,
-            "configurable": {"thread_id": f"battery-strategy-{uuid4().hex[:8]}"},
+            "configurable": {"thread_id": thread_id},
         },
+    )
+    report_path = _write_final_report_markdown(
+        result,
+        settings=settings,
+        thread_id=thread_id,
     )
 
     print("Graph compiled successfully.")
@@ -193,6 +219,10 @@ def main() -> None:
     print(f"Remaining plan steps: {len(result['plan'])}")
     print(f"Validation issues: {len(result['validation_issues'])}")
     print(f"Messages collected: {len(result['messages'])}")
+    if report_path is not None:
+        print(f"Markdown report saved to: {report_path}")
+    else:
+        print("Markdown report was not saved because final_report is empty.")
     planner_message = next(
         (
             message["content"]
