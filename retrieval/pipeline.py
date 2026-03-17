@@ -5,6 +5,7 @@ from hashlib import sha1
 from typing import Any, Literal
 
 from schemas.state import EvidenceItem, SourceDocument
+from utils.logging import get_logger
 
 
 NormalizedResult = dict[str, Any]
@@ -24,6 +25,8 @@ USED_FOR_BY_SCOPE: dict[str, str] = {
     "LGES": "lges_analysis",
     "CATL": "catl_analysis",
 }
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +117,12 @@ def run_two_stage_retrieval(
 ) -> RetrievalExecution:
     """Run local retrieval first, then fall back to web search when insufficient."""
     local_results: list[NormalizedResult] = []
+    logger.info(
+        "[%s] Starting retrieval: positive_queries=%d, risk_queries=%d",
+        company_scope,
+        len(query_policy.get("positive_queries", [])),
+        len(query_policy.get("risk_queries", [])),
+    )
 
     for stance, bucket in (("positive", "positive_queries"), ("risk", "risk_queries")):
         for query in query_policy.get(bucket, []):
@@ -132,20 +141,44 @@ def run_two_stage_retrieval(
         local_results,
         company_scope=company_scope,
     )
+    logger.info(
+        "[%s] Local RAG hits=%d, sufficient=%s",
+        company_scope,
+        len(local_results),
+        retrieval_sufficient,
+    )
     web_results: MergedRetrievalResults = {
         "positive_results": [],
         "risk_results": [],
     }
     if not retrieval_sufficient:
+        if not local_results:
+            logger.info("[%s] Local RAG returned 0 hits. Falling back to web search.", company_scope)
+        else:
+            logger.info("[%s] Local RAG was insufficient. Falling back to web search.", company_scope)
         web_results = web_search_client.search(
             positive_queries=query_policy.get("positive_queries", []),
             risk_queries=query_policy.get("risk_queries", []),
             max_results_per_query=max_results_per_query,
         )
+        logger.info(
+            "[%s] Web search hits: positive=%d, risk=%d",
+            company_scope,
+            len(web_results["positive_results"]),
+            len(web_results["risk_results"]),
+        )
+    else:
+        logger.info("[%s] Local RAG was sufficient. Web search skipped.", company_scope)
 
     merged_results = merge_retrieval_results(
         local_results=local_results,
         web_results=web_results,
+    )
+    logger.info(
+        "[%s] Merged retrieval results: positive=%d, risk=%d",
+        company_scope,
+        len(merged_results["positive_results"]),
+        len(merged_results["risk_results"]),
     )
     return RetrievalExecution(
         local_results=local_results,

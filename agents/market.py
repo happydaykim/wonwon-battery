@@ -11,6 +11,7 @@ from retrieval.pipeline import (
 )
 from retrieval.query_policy import build_market_query_policy
 from schemas.state import ReportState
+from utils.logging import get_logger
 
 
 # Market Agent: gather industry background with local RAG first.
@@ -19,6 +20,8 @@ MARKET_BLUEPRINT = create_agent_blueprint(
     prompt_name="market.md",
     tools=["local_rag", "balanced_web_search"],
 )
+
+logger = get_logger(__name__)
 
 
 def market_node(state: ReportState) -> dict:
@@ -44,6 +47,12 @@ def market_node(state: ReportState) -> dict:
         merged_results=retrieval_execution.merged_results,
         used_web_search=retrieval_execution.used_web_search,
     )
+    logger.info(
+        "[MARKET] documents=%d, evidence=%d, preview_titles=%s",
+        len(artifacts.document_ids),
+        len(artifacts.evidence_ids),
+        _preview_titles(retrieval_execution.merged_results),
+    )
 
     return {
         "documents": artifacts.documents,
@@ -55,3 +64,8 @@ def market_node(state: ReportState) -> dict:
             "synthesized_summary": summary,
         },
     }
+
+
+def _preview_titles(merged_results: dict[str, list[dict]]) -> list[str]:
+    candidates = merged_results["positive_results"][:2] + merged_results["risk_results"][:2]
+    return [item.get("title", "Untitled") for item in candidates]
