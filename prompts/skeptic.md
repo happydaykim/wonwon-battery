@@ -13,4 +13,5 @@
 제약:
 - 홍보성 결론을 그대로 수용하지 않는다.
 - weakness/threat 근거 부족을 드러낸다.
-- 실제 웹 검색 구현은 하지 않는다.
+- retrieval layer를 통해 risk 중심 counter-evidence를 최대 1회만 보강한다.
+- 보강 후에도 부족하면 gap을 유지한 채 다음 단계로 넘긴다.

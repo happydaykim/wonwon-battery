@@ -11,6 +11,6 @@
 - 보고서 초안 또는 섹션별 draft 업데이트
 
 제약:
-- 실제 보고서 본문을 완성하지 않는다.
-- evidence 연결 지점을 TODO로 남긴다.
-- skeleton 구조를 보존한다.
+- 필수 섹션 전체를 `section_drafts`와 `final_report`에 채운다.
+- 근거 부족은 hallucination 대신 명시적 caveat로 남긴다.
+- SUMMARY와 REFERENCE를 항상 포함한다.
