@@ -25,4 +25,5 @@
 - `parallel_retrieval`은 `market_agent`, `lges_agent`, `catl_agent`를 병렬 실행하는 묶음 단계다.
 - 단계명 설명문을 만들지 말고 step ID만 반환한다.
 - 필요한 단계만 선택할 수 있지만 전체 흐름은 retrieval -> skeptic -> compare -> write -> validate 순서를 벗어나지 않는다.
+- retrieval 이후 실제 skeptic 필요 여부는 Supervisor가 sufficiency 결과를 보고 최종 조정한다.
 - 답변은 한국어로 한다.
