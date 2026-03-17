@@ -19,6 +19,11 @@ class RuntimeState(TypedDict):
     ]
     revision_count: int
     max_revisions: int
+    termination_reason: Literal[
+        "validated",
+        "done_with_gaps",
+        "max_revisions_reached",
+    ] | None
 
 
 class SourceDocument(TypedDict):
@@ -62,6 +67,9 @@ class TopicResearchState(TypedDict):
     document_ids: list[str]
     evidence_ids: list[str]
     synthesized_summary: str | None
+    retrieval_sufficient: bool
+    retrieval_gaps: list[str]
+    used_web_search: bool
 
 
 class CompanyResearchState(TypedDict):
@@ -70,6 +78,11 @@ class CompanyResearchState(TypedDict):
     evidence_ids: list[str]
     counter_evidence_ids: list[str]
     synthesized_summary: str | None
+    retrieval_sufficient: bool
+    retrieval_gaps: list[str]
+    used_web_search: bool
+    skeptic_review_required: bool
+    skeptic_review_completed: bool
 
 
 class SectionDraft(TypedDict):
@@ -95,6 +108,7 @@ class ValidationIssue(TypedDict):
     message: str
     related_evidence_ids: list[str]
     suggested_action: str
+    retryable: bool
 
 
 class SWOTState(TypedDict):

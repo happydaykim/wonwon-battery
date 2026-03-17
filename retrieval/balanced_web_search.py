@@ -182,7 +182,7 @@ class BalancedWebSearchClient:
             "query": original_query,
             "query_language": query_language,
             "stance": stance,
-            "topic_tags": _infer_topic_tags(original_query, stance=stance),
+            "topic_tags": infer_topic_tags(original_query, stance=stance),
         }
 
 
@@ -193,7 +193,7 @@ def _translate_query_to_english(query: str) -> str:
     return translated
 
 
-def _infer_topic_tags(query: str, *, stance: str) -> list[str]:
+def infer_topic_tags(query: str, *, stance: str) -> list[str]:
     normalized = query.lower()
     topic_tags: list[str] = []
 

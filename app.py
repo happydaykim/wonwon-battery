@@ -90,6 +90,9 @@ def _build_default_market_state() -> TopicResearchState:
         "document_ids": [],
         "evidence_ids": [],
         "synthesized_summary": None,
+        "retrieval_sufficient": False,
+        "retrieval_gaps": [],
+        "used_web_search": False,
     }
 
 
@@ -102,6 +105,11 @@ def _build_default_company_state(
         "evidence_ids": [],
         "counter_evidence_ids": [],
         "synthesized_summary": None,
+        "retrieval_sufficient": False,
+        "retrieval_gaps": [],
+        "used_web_search": False,
+        "skeptic_review_required": False,
+        "skeptic_review_completed": False,
     }
 
 
@@ -127,6 +135,7 @@ def build_initial_state(
             "current_phase": "plan",
             "revision_count": 0,
             "max_revisions": resolved.report_max_revisions,
+            "termination_reason": None,
         },
         "documents": {},
         "evidence": {},
@@ -180,6 +189,7 @@ def main() -> None:
     print(f"Initial phase: {initial_state['runtime']['current_phase']}")
     print(f"Final phase: {result['runtime']['current_phase']}")
     print(f"Revision count: {result['runtime']['revision_count']}")
+    print(f"Termination reason: {result['runtime']['termination_reason']}")
     print(f"Remaining plan steps: {len(result['plan'])}")
     print(f"Validation issues: {len(result['validation_issues'])}")
     print(f"Messages collected: {len(result['messages'])}")
