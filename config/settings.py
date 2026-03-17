@@ -28,6 +28,10 @@ class Settings:
     vector_store: str
     chroma_persist_directory: Path
     local_corpus_page_limit: int
+    web_search_provider: str
+    google_news_period: str
+    google_news_languages: tuple[str, ...]
+    google_news_max_results_per_query: int
     document_search_max_retries: int
     web_search_max_retries: int
     report_max_revisions: int
@@ -43,6 +47,11 @@ def load_settings() -> Settings:
     chroma_directory = Path(
         os.getenv("CHROMA_PERSIST_DIRECTORY", str(data_dir / "chroma"))
     )
+    google_news_languages = tuple(
+        language.strip()
+        for language in os.getenv("GOOGLE_NEWS_LANGUAGES", "ko,en").split(",")
+        if language.strip()
+    )
 
     return Settings(
         project_root=PROJECT_ROOT,
@@ -57,6 +66,12 @@ def load_settings() -> Settings:
         vector_store=os.getenv("VECTOR_STORE", "chroma"),
         chroma_persist_directory=chroma_directory,
         local_corpus_page_limit=int(os.getenv("LOCAL_CORPUS_PAGE_LIMIT", "100")),
+        web_search_provider=os.getenv("WEB_SEARCH_PROVIDER", "google_news"),
+        google_news_period=os.getenv("GOOGLE_NEWS_PERIOD", "24m"),
+        google_news_languages=google_news_languages or ("ko", "en"),
+        google_news_max_results_per_query=int(
+            os.getenv("GOOGLE_NEWS_MAX_RESULTS_PER_QUERY", "3")
+        ),
         document_search_max_retries=int(
             os.getenv("DOCUMENT_SEARCH_MAX_RETRIES", "2")
         ),

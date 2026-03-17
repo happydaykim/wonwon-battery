@@ -21,3 +21,6 @@ htmlcov/
 
 # macOS
 .DS_Store
+
+# Local Agent files
+AGENTS.md

@@ -7,15 +7,15 @@ QueryPolicy = dict[str, list[str]]
 
 
 def build_market_query_policy(topic: str | None = None) -> QueryPolicy:
-    market_topic = topic or "전기차 캐즘과 배터리 산업 포트폴리오 다각화"
+    market_topic = topic or "전기차 캐즘 배터리 전략"
     return {
         "positive_queries": [
-            f"{market_topic} 산업 보고서",
-            f"{market_topic} ESS 로봇 HEV 기회",
+            market_topic,
+            "배터리 ESS HEV 로봇 수요",
         ],
         "risk_queries": [
-            f"{market_topic} 수익성 압박 리스크",
-            f"{market_topic} 공급과잉 경쟁 심화",
+            "전기차 캐즘 배터리 수요 둔화",
+            "배터리 공급과잉 수익성 압박",
         ],
     }
 
@@ -25,15 +25,15 @@ def build_company_query_policy(
     topic: str | None = None,
 ) -> QueryPolicy:
     company_name = "LG에너지솔루션" if company == "LGES" else "CATL"
-    company_topic = topic or "포트폴리오 다각화 전략"
+    company_topic = topic or "포트폴리오 다각화"
     return {
         "positive_queries": [
             f"{company_name} {company_topic}",
-            f"{company_name} ESS 로봇 HEV 신규 사업",
+            f"{company_name} ESS HEV 로봇 확장",
         ],
         "risk_queries": [
-            f"{company_name} {company_topic} 리스크",
-            f"{company_name} 수익성 경쟁 압력 약점",
+            f"{company_name} 수익성 리스크",
+            f"{company_name} 경쟁 압박",
         ],
     }
 

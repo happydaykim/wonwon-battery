@@ -109,8 +109,8 @@ class ReportState(TypedDict):
     plan: list[str]
     messages: list[Any]
     runtime: RuntimeState
-    documents: dict[str, SourceDocument]
-    evidence: dict[str, EvidenceItem]
+    documents: Annotated[dict[str, SourceDocument], operator.or_]
+    evidence: Annotated[dict[str, EvidenceItem], operator.or_]
     market: TopicResearchState
     companies: Annotated[dict[str, CompanyResearchState], operator.or_]
     comparison_summary: str | None

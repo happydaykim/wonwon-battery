@@ -32,7 +32,9 @@ class LocalRAGRetriever:
         company_scope: str | None = None,
         top_k: int = 5,
     ) -> list[dict[str, Any]]:
-        """Return no results until real Chroma/Qwen3 integration is added."""
+        """Return no local hits until the real Chroma/Qwen3 RAG pipeline is implemented."""
         _ = (query, company_scope, top_k)
         # TODO: Wire Chroma, document ingestion, metadata filtering, and reranking.
+        # Current policy intentionally returns zero hits so every retrieval agent falls
+        # back to web search after the sufficiency check.
         return []
