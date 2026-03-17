@@ -6,9 +6,7 @@ from schemas.state import ReportState
 
 
 SUPERVISOR_ROUTE_MAP: Final[dict[str, str]] = {
-    "retrieve_market": "market_agent",
-    "retrieve_lges": "lges_agent",
-    "retrieve_catl": "catl_agent",
+    "parallel_retrieval": "parallel_retrieval_dispatch",
     "skeptic_lges": "skeptic_agent",
     "skeptic_catl": "skeptic_agent",
     "compare": "compare_swot_agent",
@@ -19,10 +17,13 @@ SUPERVISOR_ROUTE_MAP: Final[dict[str, str]] = {
 
 def route_supervisor(state: ReportState) -> str:
     """Route the supervisor to the next specialist node."""
-    phase = state["runtime"]["current_phase"]
-    if phase not in SUPERVISOR_ROUTE_MAP:
-        raise ValueError(f"Unsupported supervisor phase: {phase}")
-    return SUPERVISOR_ROUTE_MAP[phase]
+    if state["runtime"]["current_phase"] == "done" or not state["plan"]:
+        return "done"
+
+    current_step = state["plan"][0]
+    if current_step not in SUPERVISOR_ROUTE_MAP:
+        raise ValueError(f"Unsupported supervisor step: {current_step}")
+    return SUPERVISOR_ROUTE_MAP[current_step]
 
 
 def has_revision_budget(state: ReportState) -> bool:
@@ -33,12 +34,7 @@ def has_revision_budget(state: ReportState) -> bool:
 
 def should_retry_revision(state: ReportState) -> bool:
     """Check whether validator output should branch back into the graph."""
-    runtime = state["runtime"]
-    return (
-        bool(state["validation_issues"])
-        and runtime["current_phase"] != "done"
-        and runtime["revision_count"] <= runtime["max_revisions"]
-    )
+    return state["runtime"]["current_phase"] != "done" and bool(state["plan"])
 
 
 def route_validator(state: ReportState) -> str:

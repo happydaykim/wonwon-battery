@@ -13,6 +13,8 @@ COMPARE_SWOT_BLUEPRINT = create_agent_blueprint(
 
 def compare_swot_node(state: ReportState) -> dict:
     """Prepare comparison and SWOT placeholders before report drafting."""
+    remaining_plan = state["plan"][1:]
+    next_step = remaining_plan[0] if remaining_plan else None
     message = build_agent_message(
         COMPARE_SWOT_BLUEPRINT.name,
         (
@@ -22,9 +24,10 @@ def compare_swot_node(state: ReportState) -> dict:
     )
 
     return {
+        "plan": remaining_plan,
         "messages": state["messages"] + [message],
         "runtime": {
             **state["runtime"],
-            "current_phase": "write",
+            "current_phase": next_step or "done",
         },
     }

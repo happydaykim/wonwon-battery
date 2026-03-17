@@ -14,6 +14,15 @@ from schemas.state import (
 )
 from utils.logging import configure_langsmith
 
+PLAN_STEP_LABELS = {
+    "parallel_retrieval": "Parallel Retrieval Bundle (Market + LGES + CATL)",
+    "skeptic_lges": "Skeptic Review for LGES",
+    "skeptic_catl": "Skeptic Review for CATL",
+    "compare": "Compare / SWOT",
+    "write": "Writer",
+    "validate": "Validator",
+}
+
 
 def _build_default_section_drafts() -> dict[str, SectionDraft]:
     return {
@@ -171,13 +180,24 @@ def main() -> None:
     print(f"Initial phase: {initial_state['runtime']['current_phase']}")
     print(f"Final phase: {result['runtime']['current_phase']}")
     print(f"Revision count: {result['runtime']['revision_count']}")
-    print(f"Plan steps: {len(result['plan'])}")
+    print(f"Remaining plan steps: {len(result['plan'])}")
     print(f"Validation issues: {len(result['validation_issues'])}")
     print(f"Messages collected: {len(result['messages'])}")
+    planner_message = next(
+        (
+            message["content"]
+            for message in result["messages"]
+            if message.get("name") == "planner_node"
+        ),
+        None,
+    )
+    if planner_message:
+        print("Planner summary:")
+        print(planner_message)
     if result["plan"]:
-        print("Planned workflow:")
+        print("Remaining workflow queue:")
         for index, step in enumerate(result["plan"], start=1):
-            print(f"{index}. {step}")
+            print(f"{index}. {PLAN_STEP_LABELS.get(step, step)}")
     if result["messages"]:
         print("Last message:")
         print(result["messages"][-1]["content"])

@@ -35,14 +35,22 @@ PLANNER_PROMPT = ChatPromptTemplate.from_messages(
 )
 
 
-DEFAULT_REPORT_PLAN = [
-    "시장 배경 분석 범위를 정의하고 핵심 조사 축을 정리한다.",
-    "로컬 RAG 우선 원칙에 따라 EV 캐즘, HEV 피벗, ESS/로봇/원가 전략 관련 시장 근거를 수집한다.",
-    "LGES의 포트폴리오 다각화 전략, 핵심 경쟁력, 리스크 근거를 수집한다.",
-    "CATL의 포트폴리오 다각화 전략, 핵심 경쟁력, 리스크 근거를 수집한다.",
-    "양사에 대해 skeptic 단계로 반대 근거와 제약 조건을 재점검한다.",
-    "LGES와 CATL을 동일 프레임으로 비교하고 SWOT 구조를 정리한다.",
-    "SUMMARY와 REFERENCE를 포함한 보고서 초안을 작성하고 validator 기준으로 수정 여부를 점검한다.",
+ALLOWED_PLAN_STEPS = {
+    "parallel_retrieval",
+    "skeptic_lges",
+    "skeptic_catl",
+    "compare",
+    "write",
+    "validate",
+}
+
+DEFAULT_EXECUTION_PLAN = [
+    "parallel_retrieval",
+    "skeptic_lges",
+    "skeptic_catl",
+    "compare",
+    "write",
+    "validate",
 ]
 
 
@@ -60,7 +68,14 @@ def _create_planner_chain() -> Any:
 def _build_fallback_plan(user_query: str) -> list[str]:
     """Return a deterministic fallback plan when LLM planning is unavailable."""
     _ = user_query
-    return DEFAULT_REPORT_PLAN.copy()
+    return DEFAULT_EXECUTION_PLAN.copy()
+
+
+def _sanitize_plan_steps(raw_steps: list[str]) -> list[str]:
+    """Keep only supported broad steps and preserve the canonical execution order."""
+    requested_steps = {step.strip() for step in raw_steps if step.strip() in ALLOWED_PLAN_STEPS}
+    ordered_steps = [step for step in DEFAULT_EXECUTION_PLAN if step in requested_steps]
+    return ordered_steps or DEFAULT_EXECUTION_PLAN.copy()
 
 
 def _generate_plan(user_query: str) -> tuple[list[str], str]:
@@ -68,7 +83,7 @@ def _generate_plan(user_query: str) -> tuple[list[str], str]:
     try:
         planner_chain = _create_planner_chain()
         output = planner_chain.invoke({"user_query": user_query})
-        steps = [step.strip() for step in output.steps if step.strip()]
+        steps = _sanitize_plan_steps(output.steps)
         if not steps:
             raise ValueError("Planner returned an empty steps list.")
         return steps, "llm"
@@ -78,13 +93,13 @@ def _generate_plan(user_query: str) -> tuple[list[str], str]:
 
 
 def planner_node(state: ReportState) -> dict:
-    """Create a section plan and hand off to the retrieval phase."""
+    """Create an execution queue and hand off control to the supervisor."""
     next_plan, plan_source = _generate_plan(state["user_query"])
     message = build_agent_message(
         PLANNER_BLUEPRINT.name,
         (
-            f"Section plan prepared via {plan_source} planner with "
-            f"{len(next_plan)} ordered steps."
+            f"Execution plan prepared via {plan_source} planner with "
+            f"{len(next_plan)} broad steps: {', '.join(next_plan)}."
         ),
     )
 
@@ -93,6 +108,6 @@ def planner_node(state: ReportState) -> dict:
         "messages": state["messages"] + [message],
         "runtime": {
             **state["runtime"],
-            "current_phase": "retrieve_market",
+            "current_phase": "plan",
         },
     }

@@ -13,6 +13,7 @@ WRITER_BLUEPRINT = create_agent_blueprint(
 
 def writer_node(state: ReportState) -> dict:
     """Move the report state into validation without generating fake content."""
+    remaining_plan = state["plan"][1:]
     message = build_agent_message(
         WRITER_BLUEPRINT.name,
         (
@@ -22,9 +23,10 @@ def writer_node(state: ReportState) -> dict:
     )
 
     return {
+        "plan": remaining_plan,
         "messages": state["messages"] + [message],
         "runtime": {
             **state["runtime"],
-            "current_phase": "validate",
+            "current_phase": "validate" if remaining_plan else "done",
         },
     }

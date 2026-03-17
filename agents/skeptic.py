@@ -14,19 +14,19 @@ SKEPTIC_BLUEPRINT = create_agent_blueprint(
 
 
 def skeptic_node(state: ReportState) -> dict:
-    """Prepare counter-evidence review for LGES and CATL in sequence."""
-    current_phase = state["runtime"]["current_phase"]
+    """Prepare counter-evidence review for the current company step."""
+    current_step = state["plan"][0] if state["plan"] else None
 
-    if current_phase == "skeptic_lges":
+    if current_step == "skeptic_lges":
         company = "LGES"
-        next_phase = "skeptic_catl"
-    elif current_phase == "skeptic_catl":
+    elif current_step == "skeptic_catl":
         company = "CATL"
-        next_phase = "compare"
     else:
-        raise ValueError(f"Unsupported skeptic phase: {current_phase}")
+        raise ValueError(f"Unsupported skeptic step: {current_step}")
 
     query_policy = build_company_query_policy(company)
+    remaining_plan = state["plan"][1:]
+    next_step = remaining_plan[0] if remaining_plan else None
     message = build_agent_message(
         SKEPTIC_BLUEPRINT.name,
         (
@@ -37,9 +37,10 @@ def skeptic_node(state: ReportState) -> dict:
     )
 
     return {
+        "plan": remaining_plan,
         "messages": state["messages"] + [message],
         "runtime": {
             **state["runtime"],
-            "current_phase": next_phase,
+            "current_phase": next_step or "done",
         },
     }

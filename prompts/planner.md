@@ -8,12 +8,21 @@
 - 현재 보고서 상태
 
 출력:
-- 순서가 있는 단계별 계획 목록
-- 다음 specialist가 바로 실행할 수 있는 broad step 목록
+- 순서가 있는 broad step ID 목록
+- Supervisor가 해석할 수 있는 실행 큐
 
 제약:
 - 실제 분석 결론을 만들지 않는다.
 - 설계된 아키텍처와 phase 순서를 유지한다.
 - 불필요하게 세분화하지 말고 적은 수의 넓은 단계로 정리한다.
-- 계획은 시장 배경, LGES, CATL, skeptic, 비교/SWOT, 작성/검증 흐름을 모두 포함해야 한다.
+- 아래 step ID만 사용할 수 있다.
+  - `parallel_retrieval`
+  - `skeptic_lges`
+  - `skeptic_catl`
+  - `compare`
+  - `write`
+  - `validate`
+- `parallel_retrieval`은 `market_agent`, `lges_agent`, `catl_agent`를 병렬 실행하는 묶음 단계다.
+- 단계명 설명문을 만들지 말고 step ID만 반환한다.
+- 필요한 단계만 선택할 수 있지만 전체 흐름은 retrieval -> skeptic -> compare -> write -> validate 순서를 벗어나지 않는다.
 - 답변은 한국어로 한다.

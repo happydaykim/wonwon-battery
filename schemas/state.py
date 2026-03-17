@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+import operator
+from typing import Annotated, Any, Literal, TypedDict
 
 
 class RuntimeState(TypedDict):
@@ -111,7 +112,7 @@ class ReportState(TypedDict):
     documents: dict[str, SourceDocument]
     evidence: dict[str, EvidenceItem]
     market: TopicResearchState
-    companies: dict[str, CompanyResearchState]
+    companies: Annotated[dict[str, CompanyResearchState], operator.or_]
     comparison_summary: str | None
     swot: dict[str, SWOTState]
     section_drafts: dict[str, SectionDraft]

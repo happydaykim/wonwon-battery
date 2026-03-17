@@ -84,17 +84,23 @@ def validator_node(state: ReportState) -> dict:
     """Validate draft completeness and control the revision loop."""
     issues = _build_validation_issues(state)
     runtime = {**state["runtime"]}
+    remaining_plan = (
+        state["plan"][1:] if state["plan"] and state["plan"][0] == "validate" else state["plan"]
+    )
 
     if issues and has_revision_budget(state):
         runtime["revision_count"] += 1
         runtime["current_phase"] = "write"
+        next_plan = ["write", "validate", *remaining_plan]
         note = "Validation found issues. Routing back to Writer for another revision attempt."
     else:
         runtime["current_phase"] = "done"
+        next_plan = remaining_plan
         note = "Validation finished. TODO: finalize success/failure reporting with real criteria."
 
     message = build_agent_message(VALIDATOR_BLUEPRINT.name, note)
     return {
+        "plan": next_plan,
         "validation_issues": issues,
         "messages": state["messages"] + [message],
         "runtime": runtime,
