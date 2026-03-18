@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from agents.base import build_agent_message, create_agent_blueprint
 from config.settings import load_settings
+from retrieval.article_fetcher import ArticleContentFetcher
 from retrieval.balanced_web_search import BalancedWebSearchClient
 from retrieval.pipeline import (
     build_normalized_results_from_artifacts,
@@ -35,11 +36,15 @@ def skeptic_node(state: ReportState) -> dict:
     settings = load_settings()
     query_policy = build_company_query_policy(company)
     web_search = BalancedWebSearchClient.from_settings(settings)
+    article_fetcher = ArticleContentFetcher.from_settings(settings)
     company_state = state["companies"][company]
     skeptic_results = run_skeptic_counter_retrieval(
         web_search_client=web_search,
+        article_fetcher=article_fetcher,
+        company_scope=company,
         risk_queries=query_policy["risk_queries"],
         max_results_per_query=settings.google_news_max_results_per_query,
+        article_fetch_max_documents=settings.article_fetch_max_documents,
         web_search_max_retries=settings.web_search_max_retries,
     )
     skeptic_artifacts = build_retrieval_artifacts(
@@ -213,13 +218,19 @@ def _append_skeptic_summary(
     final_sufficient: bool,
     gaps: list[str],
 ) -> str:
-    base_summary = summary or "Skeptic review summary initialized."
-    suffix = (
-        f" Skeptic review added {added_risk_evidence_count} risk evidence item(s), "
-        f"final_sufficient={final_sufficient}, "
-        f"remaining_gaps={'; '.join(gaps) if gaps else 'none'}."
-    )
-    return base_summary + suffix
+    base_summary = summary or "[핵심 요약]\n- Skeptic 이전 요약이 없어 보강 결과만 기록한다."
+    status_text = "충분" if final_sufficient else "부족"
+    suffix_lines = [
+        "[Skeptic 보강 결과]",
+        f"- 추가 확보한 리스크 근거: {added_risk_evidence_count}건",
+        f"- skeptic 이후 충분성 판단: {status_text}",
+        (
+            "- 남은 gap: 없음"
+            if not gaps
+            else "- 남은 gap: " + "; ".join(gaps)
+        ),
+    ]
+    return base_summary.rstrip() + "\n" + "\n".join(suffix_lines)
 
 
 def _build_skeptic_note(

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from hashlib import sha1
 from typing import Any, Literal
 
+from retrieval.article_fetcher import ArticleContentFetcher
 from retrieval.balanced_web_search import infer_topic_tags
 from schemas.state import EvidenceItem, SourceDocument
 from utils.logging import get_logger
@@ -168,9 +169,11 @@ def run_two_stage_retrieval(
     *,
     rag_retriever: Any,
     web_search_client: Any,
+    article_fetcher: ArticleContentFetcher | None,
     query_policy: dict[str, list[str]],
     company_scope: Literal["MARKET", "LGES", "CATL"],
     max_results_per_query: int,
+    article_fetch_max_documents: int,
     document_search_max_retries: int = 0,
     web_search_max_retries: int = 0,
 ) -> RetrievalExecution:
@@ -228,6 +231,12 @@ def run_two_stage_retrieval(
         local_results=local_results,
         web_results=web_results,
     )
+    merged_results = enrich_results_with_article_content(
+        merged_results,
+        article_fetcher=article_fetcher,
+        max_documents=article_fetch_max_documents,
+        company_scope=company_scope,
+    )
     logger.info(
         "[%s] Merged retrieval results: positive=%d, risk=%d",
         company_scope,
@@ -250,17 +259,26 @@ def run_two_stage_retrieval(
 def run_skeptic_counter_retrieval(
     *,
     web_search_client: Any,
+    article_fetcher: ArticleContentFetcher | None,
+    company_scope: Literal["LGES", "CATL"],
     risk_queries: list[str],
     max_results_per_query: int,
+    article_fetch_max_documents: int,
     web_search_max_retries: int = 0,
 ) -> MergedRetrievalResults:
     """Run a single risk-focused web search pass for skeptic counter-evidence."""
-    return _run_web_search_with_retries(
+    results = _run_web_search_with_retries(
         web_search_client=web_search_client,
         positive_queries=[],
         risk_queries=risk_queries,
         max_results_per_query=max_results_per_query,
         max_retries=web_search_max_retries,
+    )
+    return enrich_results_with_article_content(
+        results,
+        article_fetcher=article_fetcher,
+        max_documents=article_fetch_max_documents,
+        company_scope=company_scope,
     )
 
 
@@ -304,8 +322,10 @@ def build_retrieval_artifacts(
                 "evidence_id": evidence_id,
                 "doc_id": doc_id,
                 "topic": result.get("query") or "news_result",
-                "claim": result.get("title") or "Untitled claim",
-                "excerpt": result.get("snippet"),
+                "topic_tags": list(result.get("topic_tags", [])),
+                "claim": result.get("article_excerpt") or result.get("title") or "Untitled claim",
+                "excerpt": result.get("article_excerpt") or result.get("snippet"),
+                "full_text": result.get("article_text"),
                 "page_or_chunk": None,
                 "relevance_score": None,
                 "used_for": used_for,
@@ -323,21 +343,54 @@ def build_retrieval_artifacts(
 
 def summarize_retrieval(
     *,
+    company_scope: Literal["MARKET", "LGES", "CATL"],
     agent_name: str,
     local_results: list[NormalizedResult],
     merged_results: MergedRetrievalResults,
     used_web_search: bool,
     final_assessment: RetrievalAssessment,
 ) -> str:
-    """Build a short placeholder summary for the current retrieval stage."""
-    return (
-        f"{agent_name} retrieval completed. "
-        f"local_hits={len(local_results)}, "
-        f"positive_hits={len(merged_results['positive_results'])}, "
-        f"risk_hits={len(merged_results['risk_results'])}, "
-        f"web_search_used={used_web_search}, "
-        f"final_sufficient={final_assessment.sufficient}, "
-        f"gaps={'; '.join(final_assessment.gaps) if final_assessment.gaps else 'none'}."
+    """Build a structured content summary from the current retrieval stage."""
+    positive_results = merged_results["positive_results"]
+    risk_results = merged_results["risk_results"]
+    all_results = positive_results + risk_results
+
+    if not all_results:
+        gap_text = "; ".join(final_assessment.gaps) if final_assessment.gaps else "근거 없음"
+        return "\n".join(
+            [
+                "[핵심 요약]",
+                f"- {agent_name.upper()} 관련 검색 결과가 수집되지 않아 실제 내용 요약을 만들 수 없다.",
+                "[검증 상태]",
+                f"- local_hits={len(local_results)}",
+                f"- web_search_used={used_web_search}",
+                f"- 남은 gap: {gap_text}",
+            ]
+        )
+
+    return "\n".join(
+        [
+            "[핵심 요약]",
+            _build_focus_line(all_results, company_scope=company_scope),
+            (
+                f"- 현재 수집본은 긍정 근거 {len(positive_results)}건, 리스크 근거 {len(risk_results)}건으로 구성되며, "
+                + (
+                    "local 결과 부족으로 web search까지 사용했다."
+                    if used_web_search
+                    else "local retrieval만으로 구성되었다."
+                )
+            ),
+            "[주요 긍정 근거]",
+            _format_result_digest(positive_results, limit=2),
+            "[주요 리스크 근거]",
+            _format_result_digest(risk_results, limit=2),
+            "[검증 상태]",
+            (
+                "- 현재 수집본 기준 주요 coverage gap 없음."
+                if final_assessment.sufficient
+                else "- 남은 gap: " + "; ".join(final_assessment.gaps)
+            ),
+        ]
     )
 
 
@@ -367,8 +420,10 @@ def build_normalized_results_from_artifacts(
                 "source_name": document["source_name"],
                 "published_at": document["published_at"],
                 "query": evidence_item["topic"],
+                "snippet": evidence_item.get("full_text") or evidence_item["excerpt"],
                 "stance": document["stance"],
-                "topic_tags": infer_topic_tags(
+                "topic_tags": evidence_item.get("topic_tags")
+                or infer_topic_tags(
                     evidence_item["topic"],
                     stance=document["stance"],
                 ),
@@ -507,3 +562,203 @@ def _result_unique_key(result: NormalizedResult) -> str:
 def _build_doc_id(result: NormalizedResult) -> str:
     seed = _result_unique_key(result)
     return f"doc_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+
+
+def enrich_results_with_article_content(
+    merged_results: MergedRetrievalResults,
+    *,
+    article_fetcher: ArticleContentFetcher | None,
+    max_documents: int,
+    company_scope: Literal["MARKET", "LGES", "CATL"],
+) -> MergedRetrievalResults:
+    if article_fetcher is None or max_documents <= 0:
+        return merged_results
+
+    enriched: MergedRetrievalResults = {
+        "positive_results": [dict(result) for result in merged_results.get("positive_results", [])],
+        "risk_results": [dict(result) for result in merged_results.get("risk_results", [])],
+    }
+    selected_locations = _select_article_fetch_locations(
+        enriched,
+        max_documents=max_documents,
+    )
+    fetched_count = 0
+    for bucket, index in selected_locations:
+        result = enriched[bucket][index]
+        fetch_result = article_fetcher.fetch(result.get("link"))
+        if fetch_result is None:
+            continue
+
+        if fetch_result.resolved_url:
+            result["link"] = fetch_result.resolved_url
+        if fetch_result.publisher_name:
+            result["source"] = fetch_result.publisher_name
+            result["source_name"] = fetch_result.publisher_name
+        if fetch_result.title:
+            result["title"] = fetch_result.title
+        if fetch_result.excerpt:
+            result["article_excerpt"] = fetch_result.excerpt
+            result["snippet"] = fetch_result.excerpt
+        if fetch_result.full_text:
+            result["article_text"] = fetch_result.full_text
+            fetched_count += 1
+
+    logger.info(
+        "[%s] Article enrichment completed for %d/%d selected result(s).",
+        company_scope,
+        fetched_count,
+        len(selected_locations),
+    )
+    return enriched
+
+
+def _build_focus_line(
+    results: list[NormalizedResult],
+    *,
+    company_scope: Literal["MARKET", "LGES", "CATL"],
+) -> str:
+    key_queries = _pick_distinct_queries(results, limit=3)
+    if key_queries:
+        if company_scope == "MARKET":
+            return "- 수집 자료는 주로 " + ", ".join(f"'{query}'" for query in key_queries) + " 축의 시장 배경을 다룬다."
+        return "- 수집 자료는 주로 " + ", ".join(f"'{query}'" for query in key_queries) + " 축에서 전략과 리스크를 다룬다."
+
+    topic_tags = _collect_topic_tags(results)
+    if not topic_tags:
+        return "- 수집 자료의 핵심 축을 식별할 만큼 태그 정보가 충분하지 않다."
+
+    return "- 수집 자료는 " + ", ".join(topic_tags[:3]) + " 관련 쟁점에 집중되어 있다."
+
+
+def _select_article_fetch_locations(
+    merged_results: MergedRetrievalResults,
+    *,
+    max_documents: int,
+) -> list[tuple[str, int]]:
+    positive_indexes = list(range(len(merged_results.get("positive_results", []))))
+    risk_indexes = list(range(len(merged_results.get("risk_results", []))))
+
+    selected: list[tuple[str, int]] = []
+    positive_quota = min(len(positive_indexes), (max_documents + 1) // 2)
+    risk_quota = min(len(risk_indexes), max_documents // 2)
+
+    selected.extend(("positive_results", index) for index in positive_indexes[:positive_quota])
+    selected.extend(("risk_results", index) for index in risk_indexes[:risk_quota])
+
+    remaining_capacity = max_documents - len(selected)
+    if remaining_capacity > 0:
+        remaining = [
+            ("positive_results", index)
+            for index in positive_indexes[positive_quota:]
+        ] + [
+            ("risk_results", index)
+            for index in risk_indexes[risk_quota:]
+        ]
+        selected.extend(remaining[:remaining_capacity])
+
+    return selected
+
+
+def _pick_distinct_queries(results: list[NormalizedResult], *, limit: int) -> list[str]:
+    queries: list[str] = []
+    seen: set[str] = set()
+    for result in results:
+        query = str(result.get("query") or "").strip()
+        if not query or query in seen:
+            continue
+        queries.append(query)
+        seen.add(query)
+        if len(queries) >= limit:
+            break
+    return queries
+
+
+def _collect_topic_tags(results: list[NormalizedResult]) -> list[str]:
+    collected: list[str] = []
+    seen: set[str] = set()
+    for result in results:
+        tags = result.get("topic_tags", [])
+        if isinstance(tags, str):
+            tags = [tags]
+        for tag in tags:
+            if not isinstance(tag, str) or tag in seen:
+                continue
+            collected.append(tag)
+            seen.add(tag)
+    return collected
+
+
+def _format_result_digest(results: list[NormalizedResult], *, limit: int) -> str:
+    selected_results = _select_representative_results(results, limit=limit)
+    if not selected_results:
+        return "- 정보 부족"
+
+    lines: list[str] = []
+    for result in selected_results:
+        source_name = result.get("source_name") or result.get("source") or "출처 미상"
+        published_at = result.get("published_at") or "날짜 미상"
+        title = _compact_text(str(result.get("title") or "Untitled news result"), limit=160)
+        query = str(result.get("query") or "질의 미상")
+        topic_tags = result.get("topic_tags", [])
+        if isinstance(topic_tags, str):
+            topic_tags = [topic_tags]
+        tags_text = ", ".join(tag for tag in topic_tags if isinstance(tag, str)) or "없음"
+        signal = _compact_text(
+            str(result.get("snippet") or result.get("title") or "signal 없음"),
+            limit=220,
+        )
+        lines.extend(
+            [
+                f"- [{source_name} | {published_at}] {title}",
+                f"  - query: {query}",
+                f"  - tags: {tags_text}",
+                f"  - signal: {signal}",
+            ]
+        )
+
+    return "\n".join(lines)
+
+
+def _select_representative_results(
+    results: list[NormalizedResult],
+    *,
+    limit: int,
+) -> list[NormalizedResult]:
+    if limit <= 0:
+        return []
+
+    selected: list[NormalizedResult] = []
+    seen_sources: set[str] = set()
+    seen_queries: set[str] = set()
+    remaining = list(results)
+
+    while remaining and len(selected) < limit:
+        best = max(
+            remaining,
+            key=lambda result: (
+                1
+                if (result.get("source_name") or result.get("source"))
+                and (result.get("source_name") or result.get("source")) not in seen_sources
+                else 0,
+                1 if result.get("query") and result.get("query") not in seen_queries else 0,
+                1 if result.get("snippet") else 0,
+            ),
+        )
+        selected.append(best)
+        remaining.remove(best)
+
+        source_name = best.get("source_name") or best.get("source")
+        if isinstance(source_name, str) and source_name:
+            seen_sources.add(source_name)
+        query = best.get("query")
+        if isinstance(query, str) and query:
+            seen_queries.add(query)
+
+    return selected
+
+
+def _compact_text(value: str, *, limit: int) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3].rstrip() + "..."

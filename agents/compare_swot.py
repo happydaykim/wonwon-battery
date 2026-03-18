@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from agents.base import build_agent_message, create_agent_blueprint
 from config.settings import load_settings
 from schemas.state import ReportState
+from utils.evidence_context import format_evidence_packet
 from utils.logging import get_logger
 
 
@@ -109,13 +110,13 @@ def _build_comparison_context(state: ReportState) -> str:
             "[시장 배경 요약]",
             state["market"]["synthesized_summary"] or "정보 부족",
             "[시장 배경 근거]",
-            _format_evidence_block(state, state["market"]["evidence_ids"], limit=8),
+            format_evidence_packet(state, state["market"]["evidence_ids"], limit=8),
             "[LGES 요약]",
             state["companies"]["LGES"]["synthesized_summary"] or "정보 부족",
             "[LGES 근거]",
-            _format_evidence_block(state, state["companies"]["LGES"]["evidence_ids"], limit=10),
+            format_evidence_packet(state, state["companies"]["LGES"]["evidence_ids"], limit=10),
             "[LGES counter evidence]",
-            _format_evidence_block(
+            format_evidence_packet(
                 state,
                 state["companies"]["LGES"]["counter_evidence_ids"],
                 limit=5,
@@ -123,9 +124,9 @@ def _build_comparison_context(state: ReportState) -> str:
             "[CATL 요약]",
             state["companies"]["CATL"]["synthesized_summary"] or "정보 부족",
             "[CATL 근거]",
-            _format_evidence_block(state, state["companies"]["CATL"]["evidence_ids"], limit=10),
+            format_evidence_packet(state, state["companies"]["CATL"]["evidence_ids"], limit=10),
             "[CATL counter evidence]",
-            _format_evidence_block(
+            format_evidence_packet(
                 state,
                 state["companies"]["CATL"]["counter_evidence_ids"],
                 limit=5,
@@ -151,40 +152,6 @@ def _render_comparison_summary(output: CompareOutput) -> str:
             output.data_table_markdown.strip(),
         ]
     )
-
-
-def _format_evidence_block(
-    state: ReportState,
-    evidence_ids: list[str],
-    *,
-    limit: int,
-) -> str:
-    if not evidence_ids:
-        return "- 정보 부족"
-
-    lines: list[str] = []
-    for evidence_id in evidence_ids[:limit]:
-        evidence_item = state["evidence"].get(evidence_id)
-        if evidence_item is None:
-            continue
-        document = state["documents"].get(evidence_item["doc_id"])
-        if document is None:
-            continue
-
-        excerpt = evidence_item["excerpt"] or "excerpt 없음"
-        lines.append(
-            "- "
-            + " | ".join(
-                [
-                    document["source_name"],
-                    document["published_at"] or "날짜 미상",
-                    document["title"],
-                    excerpt[:220],
-                ]
-            )
-        )
-
-    return "\n".join(lines) if lines else "- 정보 부족"
 
 
 def _build_fallback_comparison_summary(state: ReportState) -> str:

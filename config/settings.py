@@ -34,6 +34,10 @@ class Settings:
     google_news_period: str
     google_news_languages: tuple[str, ...]
     google_news_max_results_per_query: int
+    article_fetch_max_documents: int
+    article_fetch_timeout_seconds: int
+    article_fetch_max_retries: int
+    article_fetch_char_limit: int
     document_search_max_retries: int
     web_search_max_retries: int
     report_max_revisions: int
@@ -78,6 +82,18 @@ def load_settings() -> Settings:
         google_news_languages=google_news_languages or ("ko", "en"),
         google_news_max_results_per_query=int(
             os.getenv("GOOGLE_NEWS_MAX_RESULTS_PER_QUERY", "3")
+        ),
+        article_fetch_max_documents=int(
+            os.getenv("ARTICLE_FETCH_MAX_DOCUMENTS", "6")
+        ),
+        article_fetch_timeout_seconds=int(
+            os.getenv("ARTICLE_FETCH_TIMEOUT_SECONDS", "8")
+        ),
+        article_fetch_max_retries=int(
+            os.getenv("ARTICLE_FETCH_MAX_RETRIES", "1")
+        ),
+        article_fetch_char_limit=int(
+            os.getenv("ARTICLE_FETCH_CHAR_LIMIT", "4000")
         ),
         document_search_max_retries=int(
             os.getenv("DOCUMENT_SEARCH_MAX_RETRIES", "2")

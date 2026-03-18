@@ -22,6 +22,12 @@ class _FakeWebSearchClient:
         return self._results
 
 
+class _NoopArticleFetcher:
+    def fetch(self, url: str | None) -> None:
+        _ = url
+        return None
+
+
 class SkepticAgentTests(unittest.TestCase):
     def test_skeptic_adds_counter_evidence_and_recomputes_gaps(self) -> None:
         state = _build_lges_state()
@@ -54,6 +60,9 @@ class SkepticAgentTests(unittest.TestCase):
         with patch(
             "agents.skeptic.BalancedWebSearchClient.from_settings",
             return_value=_FakeWebSearchClient(fake_results),
+        ), patch(
+            "agents.skeptic.ArticleContentFetcher.from_settings",
+            return_value=_NoopArticleFetcher(),
         ):
             result = skeptic_node(state)
 
@@ -75,6 +84,9 @@ class SkepticAgentTests(unittest.TestCase):
         with patch(
             "agents.skeptic.BalancedWebSearchClient.from_settings",
             return_value=_FakeWebSearchClient(fake_results),
+        ), patch(
+            "agents.skeptic.ArticleContentFetcher.from_settings",
+            return_value=_NoopArticleFetcher(),
         ):
             result = skeptic_node(state)
 
@@ -116,8 +128,10 @@ def _build_lges_state() -> dict:
         "evidence_id": "evidence_doc_existing",
         "doc_id": "doc_existing",
         "topic": "LGES 배터리 전략 ESS 확장",
+        "topic_tags": ["strategy", "expansion"],
         "claim": "LGES expansion strategy",
         "excerpt": None,
+        "full_text": None,
         "page_or_chunk": None,
         "relevance_score": None,
         "used_for": "lges_analysis",

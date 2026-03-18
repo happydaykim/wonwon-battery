@@ -2060,6 +2060,7 @@ name = "wonwon-battery"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "langchain" },
     { name = "langchain-teddynote" },
     { name = "langgraph" },
@@ -2068,6 +2069,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "langchain", specifier = ">=0.3.0" },
     { name = "langchain-teddynote", specifier = ">=0.5.4" },
     { name = "langgraph", specifier = ">=0.2.0" },
