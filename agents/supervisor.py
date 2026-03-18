@@ -146,14 +146,8 @@ def _fallback_supervisor_plan(state: ReportState) -> list[str]:
 
 
 def _rewrite_post_retrieval_plan(state: ReportState, remaining_plan: list[str]) -> list[str]:
-    tail = [step for step in POST_RETRIEVAL_TAIL if step in remaining_plan] or list(POST_RETRIEVAL_TAIL)
-    skeptic_steps: list[str] = []
-
-    for company, skeptic_step in (("LGES", "skeptic_lges"), ("CATL", "skeptic_catl")):
-        if not state["companies"][company]["retrieval_sufficient"]:
-            skeptic_steps.append(skeptic_step)
-
-    return [*skeptic_steps, *tail]
+    _ = remaining_plan
+    return [*_required_skeptic_steps(state), *POST_RETRIEVAL_TAIL]
 
 
 def _sync_skeptic_requirements(
@@ -179,11 +173,7 @@ def _sanitize_supervisor_plan(raw_steps: list[str], state: ReportState) -> list[
 
     current_step = current_plan[0]
     if current_step == "parallel_retrieval" and _parallel_retrieval_completed(state):
-        skeptic_steps = [step for step in sanitized if step in {"skeptic_lges", "skeptic_catl"}]
-        tail = [step for step in POST_RETRIEVAL_TAIL if step in sanitized]
-        if tail != list(POST_RETRIEVAL_TAIL):
-            tail = list(POST_RETRIEVAL_TAIL)
-        return [*skeptic_steps, *tail]
+        return _rewrite_post_retrieval_plan(state, sanitized)
 
     current_index = CANONICAL_PLAN_ORDER.index(current_step)
     suffix = [
@@ -244,6 +234,14 @@ def _build_fallback_rationale(state: ReportState, plan: list[str]) -> str:
     if current_step is None:
         return "No remaining broad steps."
     return f"Preserved the in-flight queue semantics for step '{current_step}'."
+
+
+def _required_skeptic_steps(state: ReportState) -> list[str]:
+    skeptic_steps: list[str] = []
+    for company, skeptic_step in (("LGES", "skeptic_lges"), ("CATL", "skeptic_catl")):
+        if not state["companies"][company]["retrieval_sufficient"]:
+            skeptic_steps.append(skeptic_step)
+    return skeptic_steps
 
 
 def _format_research_state(

@@ -41,7 +41,7 @@ class LocalRAGRetriever:
             collection_name=self.collection_name,
         )
         backend = load_embedding_backend(self.embedding_model)
-        where = {"company_scope": company_scope} if company_scope else None
+        where = _build_company_scope_filter(company_scope)
         overfetch_k = max(top_k * 4, top_k)
         result = query_collection(
             query,
@@ -142,3 +142,11 @@ def _build_excerpt(content: str, *, limit: int = 400) -> str:
     if len(normalized) <= limit:
         return normalized
     return normalized[: limit - 3].rstrip() + "..."
+
+
+def _build_company_scope_filter(company_scope: str | None) -> dict[str, Any] | None:
+    if not company_scope:
+        return None
+    if company_scope in {"LGES", "CATL"}:
+        return {"company_scope": {"$in": [company_scope, "BOTH"]}}
+    return {"company_scope": company_scope}

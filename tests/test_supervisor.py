@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from agents.supervisor import supervisor_node
+from agents.supervisor import _sanitize_supervisor_plan, supervisor_node
 from app import build_initial_state
 
 
@@ -58,6 +58,57 @@ class SupervisorBranchingTests(unittest.TestCase):
                     not catl_sufficient,
                     result["companies"]["CATL"]["skeptic_review_required"],
                 )
+
+    def test_supervisor_sanitize_reinserts_required_skeptic_steps_after_parallel_retrieval(self) -> None:
+        state = build_initial_state("query")
+        state["plan"] = [
+            "parallel_retrieval",
+            "skeptic_lges",
+            "skeptic_catl",
+            "compare",
+            "write",
+            "validate",
+        ]
+        state["market"]["synthesized_summary"] = "market done"
+        state["market"]["retrieval_sufficient"] = True
+        state["companies"]["LGES"]["synthesized_summary"] = "lges done"
+        state["companies"]["LGES"]["retrieval_sufficient"] = False
+        state["companies"]["CATL"]["synthesized_summary"] = "catl done"
+        state["companies"]["CATL"]["retrieval_sufficient"] = True
+
+        sanitized = _sanitize_supervisor_plan(
+            ["compare", "write", "validate"],
+            state,
+        )
+
+        self.assertEqual(
+            ["skeptic_lges", "compare", "write", "validate"],
+            sanitized,
+        )
+
+    def test_supervisor_sanitize_drops_unnecessary_skeptic_steps_after_parallel_retrieval(self) -> None:
+        state = build_initial_state("query")
+        state["plan"] = [
+            "parallel_retrieval",
+            "skeptic_lges",
+            "skeptic_catl",
+            "compare",
+            "write",
+            "validate",
+        ]
+        state["market"]["synthesized_summary"] = "market done"
+        state["market"]["retrieval_sufficient"] = True
+        state["companies"]["LGES"]["synthesized_summary"] = "lges done"
+        state["companies"]["LGES"]["retrieval_sufficient"] = True
+        state["companies"]["CATL"]["synthesized_summary"] = "catl done"
+        state["companies"]["CATL"]["retrieval_sufficient"] = True
+
+        sanitized = _sanitize_supervisor_plan(
+            ["skeptic_lges", "compare", "write", "validate"],
+            state,
+        )
+
+        self.assertEqual(["compare", "write", "validate"], sanitized)
 
 
 if __name__ == "__main__":

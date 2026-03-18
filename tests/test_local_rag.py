@@ -64,6 +64,41 @@ class LocalRAGRetrieverTests(unittest.TestCase):
         self.assertEqual("SourceB", results[1]["source_name"])
         mock_query_collection.assert_called_once()
         self.assertEqual(8, mock_query_collection.call_args.kwargs["top_k"])
+        self.assertEqual(
+            {"company_scope": "MARKET"},
+            mock_query_collection.call_args.kwargs["where"],
+        )
+
+    @patch("retrieval.local_rag.query_collection")
+    @patch("retrieval.local_rag.load_embedding_backend")
+    @patch("retrieval.local_rag.get_chroma_collection")
+    def test_retrieve_includes_both_scope_documents_for_company_queries(
+        self,
+        mock_get_collection,
+        mock_load_backend,
+        mock_query_collection,
+    ) -> None:
+        mock_get_collection.return_value = object()
+        mock_load_backend.return_value = {"backend": "stub"}
+        mock_query_collection.return_value = {
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+        }
+
+        retriever = LocalRAGRetriever(
+            embedding_model="test-model",
+            vector_store="chroma",
+            persist_directory=Path("/tmp/chroma"),
+        )
+
+        retriever.retrieve("battery strategy", company_scope="LGES", top_k=2)
+
+        mock_query_collection.assert_called_once()
+        self.assertEqual(
+            {"company_scope": {"$in": ["LGES", "BOTH"]}},
+            mock_query_collection.call_args.kwargs["where"],
+        )
 
 
 if __name__ == "__main__":
