@@ -36,6 +36,8 @@ URL_PATTERN = re.compile(r"https?://[^\s<]+")
 STRONG_PATTERN = re.compile(r"\*\*([^*\n]+)\*\*")
 EMPHASIS_PATTERN = re.compile(r"(?<!\*)\*([^*\n]+)\*(?!\*)")
 MM_TO_PT = 72 / 25.4
+PDF_CONTENT_TOP_MM = 16
+PDF_CONTENT_SIDE_MM = 18
 PDF_FOOTER_RESERVED_MM = 16
 PDF_PAGE_NUMBER_BOTTOM_MM = 5
 PDF_PAGE_NUMBER_HEIGHT_MM = 6
@@ -108,6 +110,14 @@ def build_report_html(
     sections_html = "\n".join(_render_section(result, section_id) for section_id in SECTION_ORDER)
     created_label = created_at.strftime("%Y-%m-%d")
     body_class = "pdf-export" if output_mode == "pdf" else "screen-export"
+    report_main = "\n".join(
+        [
+            '<main class="report-sheet">',
+            _render_title_page(report_title, created_label),
+            sections_html,
+            "</main>",
+        ]
+    )
 
     return "\n".join(
         [
@@ -122,15 +132,20 @@ def build_report_html(
             "</style>",
             "</head>",
             f'<body class="{body_class}">',
-            '<main class="report-sheet">',
+            report_main,
+            "</body>",
+            "</html>",
+        ]
+    )
+
+
+def _render_title_page(report_title: str, created_label: str) -> str:
+    return "\n".join(
+        [
             '<header class="title-page">',
             f"<h1>{escape(report_title)}</h1>",
             f'<p class="report-date">작성 일시 {escape(created_label)}</p>',
             "</header>",
-            sections_html,
-            "</main>",
-            "</body>",
-            "</html>",
         ]
     )
 
@@ -350,59 +365,149 @@ a {
 
 body.pdf-export {
   background: #ffffff;
-  font-size: 13px;
-  line-height: 1.72;
+  font-size: 12.5px;
+  line-height: 1.64;
 }
 
 body.pdf-export .report-sheet {
   width: auto;
   min-height: auto;
   margin: 0;
-  padding: 24mm 22mm 28mm;
+  padding: 0;
   box-shadow: none;
 }
 
 body.pdf-export .title-page {
-  padding-top: 14mm;
+  padding-top: 3mm;
+  margin-bottom: 10mm;
 }
 
 body.pdf-export .title-page h1 {
-  font-size: 24px;
+  font-size: 23px;
+  line-height: 1.28;
+}
+
+body.pdf-export .report-section {
+  margin-bottom: 8mm;
 }
 
 body.pdf-export .report-section h2 {
-  font-size: 18px;
+  margin-top: 0;
+  margin-bottom: 5mm;
+  padding-bottom: 2mm;
+  font-size: 17px;
+  line-height: 1.35;
+  break-after: avoid;
+  page-break-after: avoid;
 }
 
 body.pdf-export .report-section h3 {
-  font-size: 15px;
+  margin: 4mm 0 2mm;
+  font-size: 13px;
+  line-height: 1.38;
+  break-after: avoid;
+  page-break-after: avoid;
 }
 
 body.pdf-export .report-section h4 {
-  font-size: 13px;
+  margin: 2.5mm 0 1.2mm;
+  font-size: 12px;
+  line-height: 1.35;
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+body.pdf-export .report-section p {
+  margin-bottom: 2.6mm;
+  text-align: left;
+}
+
+body.pdf-export .report-table,
+body.pdf-export .swot-matrix {
+  margin: 3.2mm 0 4.2mm;
+}
+
+body.pdf-export .report-table th,
+body.pdf-export .report-table td,
+body.pdf-export .swot-matrix td {
+  padding: 5px 6px;
+}
+
+body.pdf-export .report-table caption,
+body.pdf-export .swot-matrix caption {
+  margin-bottom: 1.5mm;
+  font-size: 11px;
+}
+
+body.pdf-export .swot-company {
+  margin-bottom: 3mm;
+}
+
+body.pdf-export .swot-matrix td {
+  min-height: 0;
+}
+
+body.pdf-export .swot-label {
+  margin-bottom: 1mm;
+  font-size: 12px;
+}
+
+body.pdf-export .summary-section,
+body.pdf-export .report-table,
+body.pdf-export .swot-company {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+body.pdf-export .title-page h1,
+body.pdf-export .report-section h2,
+body.pdf-export .report-section h3,
+body.pdf-export .report-section h4,
+body.pdf-export .report-section p,
+body.pdf-export .report-section li,
+body.pdf-export .swot-matrix td,
+body.pdf-export .references-list li {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+body.pdf-export .report-section ul,
+body.pdf-export .report-section ol {
+  margin-bottom: 3mm;
+}
+
+body.pdf-export .report-section li {
+  margin-bottom: 1.5mm;
+  text-align: left;
+}
+
+body.pdf-export .report-table th,
+body.pdf-export .report-table td {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+body.pdf-export .report-table th.align-right,
+body.pdf-export .report-table td.align-right {
+  text-align: right;
+}
+
+body.pdf-export .report-table th.align-center,
+body.pdf-export .report-table td.align-center {
+  text-align: center;
+}
+
+body.pdf-export a {
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 """.strip()
 
 
-def _render_table_of_contents() -> str:
-    lines = [
-        '<nav class="toc" aria-label="목차">',
-        "<h2>Contents</h2>",
-        '<ul class="toc-list">',
-    ]
-    for section_id in SECTION_ORDER:
-        lines.append(
-            (
-                f'<li><a href="#{section_id}">'
-                f"{escape(SECTION_HEADINGS[section_id])}"
-                "</a></li>"
-            )
-        )
-    lines.extend(["</ul>", "</nav>"])
-    return "\n".join(lines)
-
-
-def _render_section(result: ReportState, section_id: str) -> str:
+def _render_section(
+    result: ReportState,
+    section_id: str,
+) -> str:
     section_class = "report-section"
     if section_id == "summary":
         section_class += " summary-section"
@@ -701,12 +806,15 @@ def _write_pdf_from_html(html: str, pdf_path: Path) -> None:
     writer = pymupdf.DocumentWriter(str(pdf_path))
     story = pymupdf.Story(html=html)
     mediabox = pymupdf.paper_rect("a4")
+    top_margin_pt = PDF_CONTENT_TOP_MM * MM_TO_PT
+    side_margin_pt = PDF_CONTENT_SIDE_MM * MM_TO_PT
     footer_reserved_pt = PDF_FOOTER_RESERVED_MM * MM_TO_PT
-    # Reserve a footer band on every page so body content never collides with page numbers.
+    # Reserve a consistent page box on every page so top whitespace and footer spacing
+    # are not dependent on where HTML page breaks happen.
     content_box = pymupdf.Rect(
-        mediabox.x0,
-        mediabox.y0,
-        mediabox.x1,
+        mediabox.x0 + side_margin_pt,
+        mediabox.y0 + top_margin_pt,
+        mediabox.x1 - side_margin_pt,
         mediabox.y1 - footer_reserved_pt,
     )
 

@@ -110,10 +110,37 @@ class AppOutputTests(unittest.TestCase):
             self.assertIn("I. EXECUTIVE SUMMARY", html)
 
             pdf = pymupdf.open(str(artifacts.pdf_path))
-            pdf_text = "\n".join(page.get_text() for page in pdf)
+            page_texts = [page.get_text() for page in pdf]
+            normalized_page_texts = [" ".join(page_text.split()) for page_text in page_texts]
+            first_block_tops = []
+            for page in pdf:
+                blocks = page.get_text("blocks")
+                visible_blocks = [block for block in blocks if str(block[4]).strip()]
+                first_block_tops.append(min(block[1] for block in visible_blocks))
+            pdf_text = "\n".join(page_texts)
             self.assertIn("배터리 시장 전략 분석 보고서", pdf_text)
             self.assertIn("LGES", pdf_text)
             self.assertIn("Battery Strategy Outlook", pdf_text)
+            self.assertGreaterEqual(len(page_texts), 1)
+            self.assertGreater(first_block_tops[0], 45)
+            self.assertTrue(all(top > 40 for top in first_block_tops))
+            self.assertIn("I. EXECUTIVE SUMMARY", normalized_page_texts[0])
+
+            compact_pdf_text = "".join(pdf_text.split())
+            expected_headings = [
+                "I. EXECUTIVE SUMMARY",
+                "II. 시장 배경",
+                "III. LG에너지솔루션의 포트폴리오 다각화 전략과 핵심 경쟁력",
+                "IV. CATL의 포트폴리오 다각화 전략과 핵심 경쟁력",
+                "V. 핵심 전략 비교 분석",
+                "V.III SWOT 분석",
+                "VI. 종합 시사점",
+                "VII. REFERENCE",
+            ]
+            heading_positions = [
+                compact_pdf_text.index("".join(heading.split())) for heading in expected_headings
+            ]
+            self.assertEqual(sorted(heading_positions), heading_positions)
 
     def test_write_final_report_artifacts_skips_empty_report(self) -> None:
         state = build_initial_state("query")
