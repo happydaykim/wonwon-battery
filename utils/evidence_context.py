@@ -11,7 +11,7 @@ def format_evidence_packet(
     *,
     limit: int,
 ) -> str:
-    selected_ids = _select_representative_evidence_ids(
+    selected_ids = select_representative_evidence_ids(
         state,
         evidence_ids,
         limit=limit,
@@ -54,6 +54,19 @@ def format_evidence_packet(
         )
 
     return "\n".join(lines) if lines else "- 정보 부족"
+
+
+def select_representative_evidence_ids(
+    state: ReportState,
+    evidence_ids: list[str],
+    *,
+    limit: int,
+) -> list[str]:
+    return _select_representative_evidence_ids(
+        state,
+        evidence_ids,
+        limit=limit,
+    )
 
 
 def format_quantitative_evidence_packet(

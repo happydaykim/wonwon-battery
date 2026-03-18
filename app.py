@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
@@ -18,6 +16,7 @@ from schemas.state import (
     TopicResearchState,
 )
 from utils.logging import configure_langsmith, configure_runtime_logging, get_logger
+from utils.report_export import ReportArtifacts, write_report_artifacts
 
 PLAN_STEP_LABELS = {
     "parallel_retrieval": "Parallel Retrieval Bundle (Market + LGES + CATL)",
@@ -176,22 +175,18 @@ def build_initial_state(
     }
 
 
-def _write_final_report_markdown(
+def _write_final_report_artifacts(
     result: ReportState,
     *,
     settings: Settings,
     thread_id: str,
-) -> Path | None:
-    """Persist the final report as a Markdown file when available."""
-    final_report = result.get("final_report")
-    if not final_report:
-        return None
-
-    settings.outputs_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    report_path = settings.outputs_dir / f"{thread_id}_{timestamp}.md"
-    report_path.write_text(final_report.rstrip() + "\n", encoding="utf-8")
-    return report_path
+) -> ReportArtifacts | None:
+    """Persist the final report as HTML/PDF artifacts when available."""
+    return write_report_artifacts(
+        result,
+        settings=settings,
+        thread_id=thread_id,
+    )
 
 
 def _prewarm_local_rag_resources(settings: Settings) -> None:
@@ -252,7 +247,7 @@ def main() -> None:
             "configurable": {"thread_id": thread_id},
         },
     )
-    report_path = _write_final_report_markdown(
+    report_artifacts = _write_final_report_artifacts(
         result,
         settings=settings,
         thread_id=thread_id,
@@ -266,10 +261,17 @@ def main() -> None:
     print(f"Remaining plan steps: {len(result['plan'])}")
     print(f"Validation issues: {len(result['validation_issues'])}")
     print(f"Messages collected: {len(result['messages'])}")
-    if report_path is not None:
-        print(f"Markdown report saved to: {report_path}")
+    if report_artifacts is not None:
+        print(f"HTML report saved to: {report_artifacts.html_path}")
+        if report_artifacts.pdf_path is not None:
+            print(f"PDF report saved to: {report_artifacts.pdf_path}")
+        else:
+            print(
+                "PDF report was not saved because export failed: "
+                f"{report_artifacts.pdf_error}"
+            )
     else:
-        print("Markdown report was not saved because final_report is empty.")
+        print("Report artifacts were not saved because final_report is empty.")
     planner_message = next(
         (
             message["content"]

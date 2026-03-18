@@ -76,6 +76,7 @@ class ArticleFetcherTests(unittest.TestCase):
                 "@context": "https://schema.org",
                 "@type": "NewsArticle",
                 "headline": "Example Title",
+                "datePublished": "2026-01-30T11:32:45+09:00",
                 "articleBody": "첫 문단입니다. 실제 기사 본문이 충분히 길게 이어집니다. 두 번째 문장도 포함됩니다."
               }
             </script>
@@ -93,8 +94,31 @@ class ArticleFetcherTests(unittest.TestCase):
         self.assertIsNotNone(parsed)
         assert parsed is not None
         self.assertEqual("Example Title", parsed["title"])
+        self.assertEqual("2026-01-30", parsed["published_at"])
         self.assertIn("실제 기사 본문", parsed["full_text"])
         self.assertIn("첫 문단입니다", parsed["excerpt"])
+
+    def test_extract_article_content_reads_published_date_from_meta_tag(self) -> None:
+        html = """
+        <html>
+          <head>
+            <meta property="og:title" content="배터리 시장 기사" />
+            <meta property="article:published_time" content="2025-12-09T08:15:00Z" />
+          </head>
+          <body>
+            <article>
+              <p>배터리 관련 실제 기사 본문이 충분한 길이로 이어지며 날짜 추출 테스트를 지원한다.</p>
+              <p>두 번째 문단도 포함되어 기사 본문 판별 기준을 충족한다.</p>
+            </article>
+          </body>
+        </html>
+        """
+
+        parsed = extract_article_content(html, char_limit=4000)
+
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual("2025-12-09", parsed["published_at"])
 
     def test_extract_article_content_strips_daum_example_prefix(self) -> None:
         html = """
@@ -147,6 +171,7 @@ class ArticleFetcherTests(unittest.TestCase):
                     resolved_url="https://publisher.example.com/final",
                     publisher_name="Publisher Example",
                     title="Fetched article title",
+                    published_at="2025-12-09",
                     excerpt="Fetched article excerpt",
                     full_text="Fetched full article text with meaningful details.",
                 )
@@ -159,6 +184,7 @@ class ArticleFetcherTests(unittest.TestCase):
         self.assertEqual("https://publisher.example.com/final", enriched_item["link"])
         self.assertEqual("Publisher Example", enriched_item["source"])
         self.assertEqual("Fetched article title", enriched_item["title"])
+        self.assertEqual("2025-12-09", enriched_item["published_at"])
         self.assertEqual("Fetched article excerpt", enriched_item["snippet"])
         self.assertEqual(
             "Fetched full article text with meaningful details.",

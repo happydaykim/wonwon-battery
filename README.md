@@ -8,7 +8,7 @@
 
 이 프로젝트는 전기차 캐즘 환경에서 LG에너지솔루션과 CATL의 포트폴리오 다각화 전략을 비교 분석하는 멀티 에이전트 시스템의 초기 스캐폴딩입니다.
 
-현재 저장소는 LangGraph/LangChain 기반 멀티에이전트 구조 위에 LLM supervisor routing, local-first retrieval expansion decision, skeptic 재검증, 실제 한국어 Markdown 보고서 생성까지 연결된 상태입니다.
+현재 저장소는 LangGraph/LangChain 기반 멀티에이전트 구조 위에 LLM supervisor routing, local-first retrieval expansion decision, retrieval sufficiency 분기, skeptic 재검증, 실제 한국어 HTML/PDF 보고서 생성까지 연결된 상태입니다.
 
 ## Features
 
@@ -18,8 +18,8 @@
 - `local RAG -> LLM retrieval decision -> balanced web search / query refinement -> skeptic re-check` 정책
 - `parallel_retrieval` 이후 retrieval sufficiency 기반 supervisor 동적 분기
 - retryable / non-retryable validation issue와 안전 종료 사유 기록
-- 실제 한국어 보고서 본문 및 Markdown 파일 저장
-- 실제 사용 LLM prompt만 분리 관리
+- 실제 한국어 보고서 본문 및 클래식 스타일 HTML/PDF 파일 저장
+- Prompt 파일 분리 및 역할별 계약 정리
 - `MemorySaver` 기반 그래프 컴파일 지점 제공
 - app startup 시 local RAG prewarm 및 noisy third-party log 축소 지원
 - `.env.example`, `requirements.txt`, 기본 디렉터리 구조 포함

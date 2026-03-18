@@ -42,12 +42,13 @@ class LocalRAGRetriever:
         )
         backend = load_embedding_backend(self.embedding_model)
         where = {"company_scope": company_scope} if company_scope else None
+        overfetch_k = max(top_k * 4, top_k)
         result = query_collection(
             query,
             collection=collection,
             embedding_backend=backend,
             where=where,
-            top_k=top_k,
+            top_k=overfetch_k,
         )
 
         documents = _first_query_batch(result.get("documents"))
@@ -55,18 +56,37 @@ class LocalRAGRetriever:
         distances = _first_query_batch(result.get("distances"))
 
         matches: list[dict[str, Any]] = []
+        seen_doc_keys: set[str] = set()
         for document, metadata, distance in zip(
             documents,
             metadatas,
             distances,
         ):
-            matches.append(
-                _normalize_local_match(
-                    document=document,
-                    metadata=metadata or {},
-                    distance=distance,
-                )
+            normalized_metadata = dict(metadata or {})
+            doc_key = (
+                normalized_metadata.get("doc_id")
+                or normalized_metadata.get("source_url")
+                or normalized_metadata.get("chunk_id")
             )
+            if doc_key in seen_doc_keys:
+                continue
+            if doc_key:
+                seen_doc_keys.add(str(doc_key))
+            matches.append(
+                {
+                    **normalized_metadata,
+                    **_normalize_local_match(
+                        document=document,
+                        metadata=normalized_metadata,
+                        distance=distance,
+                    ),
+                    "page_content": document,
+                    "metadata": normalized_metadata,
+                    "distance": distance,
+                }
+            )
+            if len(matches) >= top_k:
+                break
         return matches
 
 

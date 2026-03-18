@@ -1,6 +1,7 @@
 """Retrieval utilities for local RAG and balanced web search."""
 
 from retrieval.balanced_web_search import BalancedWebSearchClient
+from retrieval.judge import RetrievalJudge
 from retrieval.local_rag import LocalRAGRetriever
 from retrieval.pipeline import (
     build_normalized_results_from_artifacts,
@@ -20,6 +21,7 @@ from retrieval.query_policy import (
 
 __all__ = [
     "BalancedWebSearchClient",
+    "RetrievalJudge",
     "LocalRAGRetriever",
     "build_normalized_results_from_artifacts",
     "build_retrieval_artifacts",

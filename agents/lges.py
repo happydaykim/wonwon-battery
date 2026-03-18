@@ -3,6 +3,7 @@ from __future__ import annotations
 from config.settings import load_settings
 from retrieval.article_fetcher import ArticleContentFetcher
 from retrieval.balanced_web_search import BalancedWebSearchClient
+from retrieval.judge import RetrievalJudge
 from retrieval.local_rag import LocalRAGRetriever
 from retrieval.pipeline import (
     build_retrieval_artifacts,
@@ -23,10 +24,12 @@ def lges_node(state: ReportState) -> dict:
     local_rag = LocalRAGRetriever.from_settings(settings)
     web_search = BalancedWebSearchClient.from_settings(settings)
     article_fetcher = ArticleContentFetcher.from_settings(settings)
+    retrieval_judge = RetrievalJudge.from_settings(settings)
     retrieval_execution = run_two_stage_retrieval(
         rag_retriever=local_rag,
         web_search_client=web_search,
         article_fetcher=article_fetcher,
+        retrieval_judge=retrieval_judge,
         query_policy=query_policy,
         company_scope="LGES",
         max_results_per_query=settings.google_news_max_results_per_query,
