@@ -12,12 +12,56 @@ except ImportError:  # pragma: no cover - optional during skeleton setup
         return False
 
 
-@lru_cache(maxsize=None)
-def get_logger(name: str = "battery_strategy_agent") -> logging.Logger:
-    """Return a shared logger configured for local development."""
+THIRD_PARTY_LOG_LEVELS = {
+    "httpx": logging.WARNING,
+    "httpcore": logging.WARNING,
+    "sentence_transformers": logging.WARNING,
+    "transformers": logging.WARNING,
+    "huggingface_hub": logging.ERROR,
+    "huggingface_hub.utils._http": logging.ERROR,
+    "chromadb": logging.WARNING,
+}
+
+
+def configure_runtime_logging(*, quiet_third_party_logs: bool = True) -> None:
+    """Configure root logging and optionally quiet noisy third-party libraries."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
+
+    if quiet_third_party_logs:
+        try:
+            from huggingface_hub.utils import disable_progress_bars
+            from transformers.utils import logging as transformers_logging
+        except ImportError:
+            pass
+        else:
+            disable_progress_bars()
+            transformers_logging.disable_progress_bar()
+    else:
+        try:
+            from huggingface_hub.utils import enable_progress_bars
+            from transformers.utils import logging as transformers_logging
+        except ImportError:
+            pass
+        else:
+            enable_progress_bars()
+            if hasattr(transformers_logging, "enable_progress_bar"):
+                transformers_logging.enable_progress_bar()
+
+    for logger_name, level in THIRD_PARTY_LOG_LEVELS.items():
+        logging.getLogger(logger_name).setLevel(
+            level if quiet_third_party_logs else logging.NOTSET
+        )
+
+
+@lru_cache(maxsize=None)
+def get_logger(name: str = "battery_strategy_agent") -> logging.Logger:
+    """Return a shared logger configured for local development."""
+    configure_runtime_logging(
+        quiet_third_party_logs=os.getenv("QUIET_THIRD_PARTY_LOGS", "true").lower()
+        == "true"
     )
     return logging.getLogger(name)
 

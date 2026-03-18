@@ -1,15 +1,36 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from threading import Lock
 from typing import Any
 
 
 EMBEDDING_MODEL_ID = "Qwen/Qwen3-Embedding-0.6B"
+EMBEDDING_MODEL_ALIASES = {
+    "Qwen3-Embedding-0.6B": EMBEDDING_MODEL_ID,
+    EMBEDDING_MODEL_ID: EMBEDDING_MODEL_ID,
+}
+_EMBEDDING_BACKEND_LOCK = Lock()
+
+
+def normalize_embedding_model_id(model_id: str | None) -> str:
+    resolved = (model_id or "").strip()
+    if not resolved:
+        return EMBEDDING_MODEL_ID
+    return EMBEDDING_MODEL_ALIASES.get(resolved, resolved)
 
 
 @lru_cache(maxsize=1)
 def load_embedding_backend(model_id: str = EMBEDDING_MODEL_ID) -> dict[str, Any]:
-    """Load the shared LangChain Hugging Face embedding backend."""
+    """Load the shared embedding backend once per model id."""
+    normalized_model_id = normalize_embedding_model_id(model_id)
+    with _EMBEDDING_BACKEND_LOCK:
+        return _load_embedding_backend_cached(normalized_model_id)
+
+
+@lru_cache(maxsize=4)
+def _load_embedding_backend_cached(model_id: str) -> dict[str, Any]:
+    """Build the shared LangChain Hugging Face embedding backend."""
     try:
         import torch
         from langchain_huggingface import HuggingFaceEmbeddings

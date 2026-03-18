@@ -12,6 +12,11 @@ except ImportError:  # pragma: no cover - optional during skeleton setup
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-0.6B"
+EMBEDDING_MODEL_ALIASES = {
+    "Qwen3-Embedding-0.6B": DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_EMBEDDING_MODEL: DEFAULT_EMBEDDING_MODEL,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +25,8 @@ class Settings:
     data_dir: Path
     outputs_dir: Path
     prompts_dir: Path
+    quiet_third_party_logs: bool
+    local_rag_prewarm_enabled: bool
     langsmith_enabled: bool
     langsmith_project: str
     llm_provider: str
@@ -43,6 +50,13 @@ class Settings:
     report_max_revisions: int
 
 
+def _normalize_embedding_model(model_id: str | None) -> str:
+    resolved = (model_id or "").strip()
+    if not resolved:
+        return DEFAULT_EMBEDDING_MODEL
+    return EMBEDDING_MODEL_ALIASES.get(resolved, resolved)
+
+
 def load_settings() -> Settings:
     """Load runtime settings from environment variables."""
     _load_dotenv()
@@ -64,6 +78,16 @@ def load_settings() -> Settings:
         data_dir=data_dir,
         outputs_dir=outputs_dir,
         prompts_dir=prompts_dir,
+        quiet_third_party_logs=os.getenv(
+            "QUIET_THIRD_PARTY_LOGS",
+            "true",
+        ).lower()
+        == "true",
+        local_rag_prewarm_enabled=os.getenv(
+            "LOCAL_RAG_PREWARM_ENABLED",
+            "true",
+        ).lower()
+        == "true",
         langsmith_enabled=os.getenv("LANGSMITH_ENABLED", "true").lower() == "true",
         langsmith_project=os.getenv("LANGSMITH_PROJECT", "battery-strategy-agent"),
         llm_provider=os.getenv("LLM_PROVIDER", "openai"),
@@ -73,7 +97,9 @@ def load_settings() -> Settings:
             os.getenv("LLM_PROVIDER", "openai"),
         ),
         report_llm_model=os.getenv("REPORT_LLM_MODEL", "gpt-4o"),
-        embedding_model=os.getenv("EMBEDDING_MODEL", "Qwen3-Embedding-0.6B"),
+        embedding_model=_normalize_embedding_model(
+            os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
+        ),
         vector_store=os.getenv("VECTOR_STORE", "chroma"),
         chroma_persist_directory=chroma_directory,
         local_corpus_page_limit=int(os.getenv("LOCAL_CORPUS_PAGE_LIMIT", "100")),

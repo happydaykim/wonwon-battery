@@ -21,6 +21,7 @@
 - 실제 한국어 보고서 본문 및 Markdown 파일 저장
 - Prompt 파일 분리 및 역할별 계약 정리
 - `MemorySaver` 기반 그래프 컴파일 지점 제공
+- app startup 시 local RAG prewarm 및 noisy third-party log 축소 지원
 - `.env.example`, `requirements.txt`, 기본 디렉터리 구조 포함
 
 ## Tech Stack
@@ -29,7 +30,7 @@
 - LangGraph
 - LangChain
 - Chroma
-- Qwen3-Embedding-0.6B
+- Qwen/Qwen3-Embedding-0.6B
 - python-dotenv
 
 ## Agents
@@ -54,7 +55,7 @@ retrieval 정책은 아래 순서를 따릅니다.
 
 `1차 local RAG -> 2차 balanced web search -> 3차 skeptic re-check`
 
-현재는 local RAG가 placeholder이므로 대부분 web search fallback을 타지만, retrieval sufficiency / skeptic 분기 / 실제 보고서 생성 / safe termination 로직은 상태 전이로 연결되어 있습니다.
+현재는 local RAG가 먼저 실행되고, evidence가 부족할 때에만 web search fallback을 탑니다. retrieval sufficiency / skeptic 분기 / 실제 보고서 생성 / safe termination 로직은 상태 전이로 연결되어 있습니다.
 
 ## LLM Policy
 
@@ -67,6 +68,13 @@ retrieval 정책은 아래 순서를 따릅니다.
 - `planner.md`, `compare_swot.md`, `writer.md`는 실제 system prompt로 사용됩니다.
 - 나머지 prompt 파일은 현재 deterministic node의 운영 계약서 역할을 겸합니다.
 - 모든 prompt는 코드의 실제 동작과 맞아야 하며, placeholder나 TODO 문구를 남기지 않는 것을 원칙으로 합니다.
+
+## Local Run Notes
+
+- 기본 실행: `uv run app.py`
+- 기본값으로 `LOCAL_RAG_PREWARM_ENABLED=true`가 적용되어 app 시작 시 Chroma collection과 embedding backend를 미리 데웁니다.
+- 기본값으로 `QUIET_THIRD_PARTY_LOGS=true`가 적용되어 `httpx`, `sentence_transformers`, `huggingface_hub`의 과한 INFO 로그를 줄입니다.
+- 초기 모델 다운로드가 잦거나 rate limit이 걸리면 `HF_TOKEN`을 설정하면 안정성과 속도에 도움이 됩니다.
 
 ## Directory Structure
 
@@ -126,8 +134,8 @@ retrieval 정책은 아래 순서를 따릅니다.
 ## TODO
 
 - Supervisor/validator 등 deterministic node를 실제 LLM handoff 구조로 확장할지 검토
-- Chroma 컬렉션 생성 및 로컬 문서 ingestion 구현
-- evidence 추출 및 citation formatting 구현
+- local corpus 확장 및 metadata 품질 개선
+- retrieval reranking 및 gap-aware query refinement 검토
 - 본문 인라인 citation 전략 보강
 
 ## Contributors

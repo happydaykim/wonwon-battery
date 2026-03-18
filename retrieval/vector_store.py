@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from retrieval.embeddings import embed_query, embed_texts, load_embedding_backend
@@ -8,6 +10,7 @@ from retrieval.vector_schema import DEFAULT_COLLECTION_NAME, VECTOR_METADATA_FIE
 
 
 DEFAULT_CHROMA_DIR = Path(__file__).resolve().parent.parent / "data" / "chroma"
+_CHROMA_COLLECTION_LOCK = Lock()
 
 
 def get_chroma_collection(
@@ -16,13 +19,24 @@ def get_chroma_collection(
     collection_name: str = DEFAULT_COLLECTION_NAME,
 ) -> Any:
     """Open the shared persistent Chroma collection."""
+    chroma_dir.mkdir(parents=True, exist_ok=True)
+    chroma_dir_str = str(chroma_dir.resolve())
+    with _CHROMA_COLLECTION_LOCK:
+        return _get_cached_chroma_collection(chroma_dir_str, collection_name)
+
+
+def _create_persistent_client(chroma_dir: str) -> Any:
     try:
         import chromadb
     except ImportError as exc:  # pragma: no cover - depends on local environment
         raise RuntimeError("chromadb is required for vector storage.") from exc
 
-    chroma_dir.mkdir(parents=True, exist_ok=True)
-    client = chromadb.PersistentClient(path=str(chroma_dir))
+    return chromadb.PersistentClient(path=chroma_dir)
+
+
+@lru_cache(maxsize=8)
+def _get_cached_chroma_collection(chroma_dir: str, collection_name: str) -> Any:
+    client = _create_persistent_client(chroma_dir)
     return client.get_or_create_collection(name=collection_name)
 
 
