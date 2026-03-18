@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Literal
 
 from langchain.chat_models import init_chat_model
@@ -10,8 +11,11 @@ from pydantic import BaseModel, Field
 from config.settings import Settings, load_settings
 
 
-MAX_RESULTS_IN_CONTEXT = 12
+MAX_RESULTS_IN_CONTEXT = 16
 MAX_QUERY_SUGGESTIONS_PER_BUCKET = 2
+NUMERIC_PATTERN = re.compile(
+    r"(?i)(\d[\d,\.]*\s?(?:%|배|건|개|명|대|억|조|만|천|원|달러|억원|조원|GWh|MWh|kWh|Wh|GW|MW|kW|Ah|mAh|x|X|YoY|yoy|bp|bps)?)"
+)
 
 
 class RetrievalJudgeOutput(BaseModel):
@@ -174,7 +178,11 @@ def _format_results_for_judge(results: list[dict[str, object]], *, limit: int) -
         if index > limit:
             break
 
-        title = _compact_text(str(result.get("title") or "Untitled"), limit=160)
+        title = _compact_text(
+            str(result.get("title") or "Untitled"),
+            limit=200,
+            numeric_limit=260,
+        )
         source = str(
             result.get("source_name")
             or result.get("source")
@@ -183,7 +191,11 @@ def _format_results_for_judge(results: list[dict[str, object]], *, limit: int) -
         )
         published_at = str(result.get("published_at") or "날짜 미상")
         stance = str(result.get("stance") or "unknown")
-        query = _compact_text(str(result.get("query") or "질의 미상"), limit=120)
+        query = _compact_text(
+            str(result.get("query") or "질의 미상"),
+            limit=180,
+            numeric_limit=240,
+        )
         raw_tags = result.get("topic_tags", [])
         if isinstance(raw_tags, str):
             tags = raw_tags
@@ -198,7 +210,8 @@ def _format_results_for_judge(results: list[dict[str, object]], *, limit: int) -
                 or result.get("page_content")
                 or ""
             ),
-            limit=220,
+            limit=340,
+            numeric_limit=460,
         ) or "excerpt 없음"
         lines.extend(
             [
@@ -208,6 +221,12 @@ def _format_results_for_judge(results: list[dict[str, object]], *, limit: int) -
                 f"   - excerpt: {excerpt}",
             ]
         )
+        page_or_chunk = str(result.get("page_or_chunk") or "").strip()
+        relevance_score = result.get("relevance_score")
+        if page_or_chunk:
+            lines.append(f"   - locator: {page_or_chunk}")
+        if isinstance(relevance_score, (int, float)):
+            lines.append(f"   - relevance_score: {float(relevance_score):.3f}")
 
     return "\n".join(lines) if lines else "- no unique evidence"
 
@@ -229,8 +248,16 @@ def _normalize_string_list(values: list[str], *, limit: int | None = None) -> li
     return normalized
 
 
-def _compact_text(value: str, *, limit: int) -> str:
+def _compact_text(
+    value: str,
+    *,
+    limit: int,
+    numeric_limit: int | None = None,
+) -> str:
     normalized = " ".join(value.split())
-    if len(normalized) <= limit:
+    effective_limit = limit
+    if numeric_limit is not None and NUMERIC_PATTERN.search(normalized):
+        effective_limit = max(limit, numeric_limit)
+    if len(normalized) <= effective_limit:
         return normalized
-    return normalized[: limit - 3].rstrip() + "..."
+    return normalized[: effective_limit - 3].rstrip() + "..."

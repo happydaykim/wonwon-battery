@@ -5,6 +5,11 @@ import re
 from schemas.state import ReportState
 
 
+NUMERIC_PATTERN = re.compile(
+    r"(?i)(\d[\d,\.]*\s?(?:%|배|건|개|명|대|억|조|만|천|원|달러|억원|조원|GWh|MWh|kWh|Wh|GW|MW|kW|Ah|mAh|x|X|YoY|yoy|bp|bps)?)"
+)
+
+
 def format_evidence_packet(
     state: ReportState,
     evidence_ids: list[str],
@@ -34,15 +39,18 @@ def format_evidence_packet(
         published_at = document["published_at"] or "날짜 미상"
         query = evidence_item["topic"] or "질의 미상"
         tags = ", ".join(evidence_item.get("topic_tags", [])) or "없음"
-        title = _compact_text(document["title"], limit=160)
-        claim = _compact_text(evidence_item["claim"], limit=180)
+        title = _compact_text(document["title"], limit=220, numeric_limit=280)
+        claim = _compact_text(evidence_item["claim"], limit=320, numeric_limit=420)
         excerpt = _compact_text(
             evidence_item.get("full_text")
             or evidence_item["excerpt"]
             or evidence_item["claim"]
             or "excerpt 없음",
-            limit=240,
+            limit=520,
+            numeric_limit=700,
         )
+        locator = evidence_item.get("page_or_chunk")
+        relevance_score = evidence_item.get("relevance_score")
         lines.extend(
             [
                 f"- [{stance} | {source_name} | {published_at}] {title}",
@@ -52,6 +60,10 @@ def format_evidence_packet(
                 f"  - excerpt: {excerpt}",
             ]
         )
+        if locator:
+            lines.append(f"  - locator: {locator}")
+        if isinstance(relevance_score, (int, float)):
+            lines.append(f"  - relevance_score: {float(relevance_score):.3f}")
 
     return "\n".join(lines) if lines else "- 정보 부족"
 
@@ -78,7 +90,7 @@ def format_quantitative_evidence_packet(
     selected_ids = _select_representative_evidence_ids(
         state,
         evidence_ids,
-        limit=max(limit * 2, limit),
+        limit=max(limit * 3, limit),
     )
     if not selected_ids:
         return "- 정량 근거 없음"
@@ -107,7 +119,7 @@ def format_quantitative_evidence_packet(
 
         source_name = document["source_name"] or "출처 미상"
         published_at = document["published_at"] or "날짜 미상"
-        title = _compact_text(document["title"], limit=140)
+        title = _compact_text(document["title"], limit=180, numeric_limit=220)
         for snippet in numeric_snippets:
             normalized = " ".join(snippet.split())
             if normalized in seen_snippets:
@@ -282,16 +294,19 @@ def _is_valid_candidate(state: ReportState, evidence_id: str) -> bool:
     return evidence_item["doc_id"] in state["documents"]
 
 
-def _compact_text(value: str, *, limit: int) -> str:
+def _compact_text(
+    value: str,
+    *,
+    limit: int,
+    numeric_limit: int | None = None,
+) -> str:
     normalized = " ".join(value.split())
-    if len(normalized) <= limit:
+    effective_limit = limit
+    if numeric_limit is not None and NUMERIC_PATTERN.search(normalized):
+        effective_limit = max(limit, numeric_limit)
+    if len(normalized) <= effective_limit:
         return normalized
-    return normalized[: limit - 3].rstrip() + "..."
-
-
-NUMERIC_PATTERN = re.compile(
-    r"(?i)(\d[\d,\.]*\s?(?:%|배|건|개|명|대|억|조|만|천|원|달러|억원|조원|GWh|MWh|kWh|Wh|GW|MW|kW|Ah|mAh|x|X|YoY|yoy|bp|bps)?)"
-)
+    return normalized[: effective_limit - 3].rstrip() + "..."
 
 
 def _extract_numeric_snippets(values: list[str | None]) -> list[str]:
@@ -303,9 +318,9 @@ def _extract_numeric_snippets(values: list[str | None]) -> list[str]:
             normalized = " ".join(chunk.split())
             if not normalized or not NUMERIC_PATTERN.search(normalized):
                 continue
-            snippets.append(_compact_text(normalized, limit=180))
-            if len(snippets) >= 2:
+            snippets.append(_compact_text(normalized, limit=320, numeric_limit=420))
+            if len(snippets) >= 3:
                 break
-        if len(snippets) >= 2:
+        if len(snippets) >= 3:
             break
     return snippets

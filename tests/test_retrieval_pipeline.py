@@ -1031,7 +1031,19 @@ class RetrievalPipelineTests(unittest.TestCase):
                     source="SourceA",
                     stance="positive",
                     topic_tags=["strategy", "expansion"],
-                )
+                ),
+                _result(
+                    title="LGES secures 128GWh backlog",
+                    source="SourceC",
+                    stance="positive",
+                    topic_tags=["strategy", "expansion"],
+                ),
+                _result(
+                    title="LGES raises ESS revenue target by 55%",
+                    source="SourceD",
+                    stance="positive",
+                    topic_tags=["strategy", "growth"],
+                ),
             ],
             "risk_results": [
                 _result(
@@ -1066,7 +1078,10 @@ class RetrievalPipelineTests(unittest.TestCase):
         self.assertIn("[주요 긍정 근거]", summary)
         self.assertIn("[주요 리스크 근거]", summary)
         self.assertIn("LGES expands ESS portfolio", summary)
+        self.assertIn("LGES secures 128GWh backlog", summary)
+        self.assertIn("LGES raises ESS revenue target by 55%", summary)
         self.assertIn("LGES faces profitability pressure", summary)
+        self.assertIn("대표 출처는 4곳", summary)
 
     def test_topic_tags_survive_artifact_roundtrip(self) -> None:
         merged_results = {

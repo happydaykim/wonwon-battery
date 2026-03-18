@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from hashlib import sha1
+import re
 from typing import Any, Literal
 
 from config.settings import load_settings
@@ -15,6 +16,10 @@ from utils.logging import get_logger
 
 NormalizedResult = dict[str, Any]
 MergedRetrievalResults = dict[str, list[NormalizedResult]]
+
+NUMERIC_PATTERN = re.compile(
+    r"(?i)(\d[\d,\.]*\s?(?:%|배|건|개|명|대|억|조|만|천|원|달러|억원|조원|GWh|MWh|kWh|Wh|GW|MW|kW|Ah|mAh|x|X|YoY|yoy|bp|bps)?)"
+)
 
 MIN_EVIDENCE_COUNT = 3
 MIN_SOURCE_COUNT = 2
@@ -707,6 +712,7 @@ def summarize_retrieval(
     risk_results = merged_results["risk_results"]
     all_results = positive_results + risk_results
     query_note = ", ".join(f"'{query}'" for query in query_history[:6]) or "기록 없음"
+    source_count = _count_distinct_sources(all_results)
 
     if not all_results:
         gap_text = "; ".join(final_assessment.gaps) if final_assessment.gaps else "근거 없음"
@@ -735,13 +741,14 @@ def summarize_retrieval(
                     else "local retrieval만으로 구성되었다."
                 )
             ),
+            f"- 대표 출처는 {source_count}곳이며, 동일 출처 반복보다 서로 다른 근거 축이 우선 반영되었다.",
             "[검색 루프]",
             f"- 실행 질의: {query_note}",
             f"- refinement_rounds={refinement_rounds}",
             "[주요 긍정 근거]",
-            _format_result_digest(positive_results, limit=2),
+            _format_result_digest(positive_results, limit=3),
             "[주요 리스크 근거]",
-            _format_result_digest(risk_results, limit=2),
+            _format_result_digest(risk_results, limit=3),
             "[검증 상태]",
             (
                 "- 현재 수집본 기준 주요 coverage gap 없음."
@@ -1417,6 +1424,15 @@ def _collect_topic_tags(results: list[NormalizedResult]) -> list[str]:
     return collected
 
 
+def _count_distinct_sources(results: list[NormalizedResult]) -> int:
+    sources = {
+        str(result.get("source_name") or result.get("source") or "").strip()
+        for result in results
+        if str(result.get("source_name") or result.get("source") or "").strip()
+    }
+    return len(sources)
+
+
 def _format_result_digest(results: list[NormalizedResult], *, limit: int) -> str:
     selected_results = _select_representative_results(results, limit=limit)
     if not selected_results:
@@ -1426,15 +1442,24 @@ def _format_result_digest(results: list[NormalizedResult], *, limit: int) -> str
     for result in selected_results:
         source_name = result.get("source_name") or result.get("source") or "출처 미상"
         published_at = result.get("published_at") or "날짜 미상"
-        title = _compact_text(str(result.get("title") or "Untitled news result"), limit=160)
-        query = str(result.get("query") or "질의 미상")
+        title = _compact_text(
+            str(result.get("title") or "Untitled news result"),
+            limit=200,
+            numeric_limit=260,
+        )
+        query = _compact_text(
+            str(result.get("query") or "질의 미상"),
+            limit=180,
+            numeric_limit=240,
+        )
         topic_tags = result.get("topic_tags", [])
         if isinstance(topic_tags, str):
             topic_tags = [topic_tags]
         tags_text = ", ".join(tag for tag in topic_tags if isinstance(tag, str)) or "없음"
         signal = _compact_text(
             str(result.get("snippet") or result.get("title") or "signal 없음"),
-            limit=220,
+            limit=340,
+            numeric_limit=460,
         )
         lines.extend(
             [
@@ -1444,6 +1469,12 @@ def _format_result_digest(results: list[NormalizedResult], *, limit: int) -> str
                 f"  - signal: {signal}",
             ]
         )
+        page_or_chunk = str(result.get("page_or_chunk") or "").strip()
+        relevance_score = result.get("relevance_score")
+        if page_or_chunk:
+            lines.append(f"  - locator: {page_or_chunk}")
+        if isinstance(relevance_score, (int, float)):
+            lines.append(f"  - relevance_score: {float(relevance_score):.3f}")
 
     return "\n".join(lines)
 
@@ -1486,8 +1517,16 @@ def _select_representative_results(
     return selected
 
 
-def _compact_text(value: str, *, limit: int) -> str:
+def _compact_text(
+    value: str,
+    *,
+    limit: int,
+    numeric_limit: int | None = None,
+) -> str:
     normalized = " ".join(value.split())
-    if len(normalized) <= limit:
+    effective_limit = limit
+    if numeric_limit is not None and NUMERIC_PATTERN.search(normalized):
+        effective_limit = max(limit, numeric_limit)
+    if len(normalized) <= effective_limit:
         return normalized
-    return normalized[: limit - 3].rstrip() + "..."
+    return normalized[: effective_limit - 3].rstrip() + "..."
