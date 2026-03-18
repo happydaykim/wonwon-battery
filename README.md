@@ -77,6 +77,36 @@ retrieval 정책은 아래 순서를 따릅니다.
 - 기본값으로 `QUIET_THIRD_PARTY_LOGS=true`가 적용되어 `httpx`, `sentence_transformers`, `huggingface_hub`의 과한 INFO 로그를 줄입니다.
 - 초기 모델 다운로드가 잦거나 rate limit이 걸리면 `HF_TOKEN`을 설정하면 안정성과 속도에 도움이 됩니다.
 
+## Graph Visualization
+
+LangGraph compiled object는 Mermaid PNG 렌더링을 먼저 시도하고, 실패하면 ASCII 그래프로 fallback 하도록 바로 시각화할 수 있습니다.
+
+```python
+from graph.builder import build_graph
+from graph.visualization import display_graph
+
+supervisor = build_graph()
+display_graph(supervisor)
+```
+
+위 헬퍼는 내부적으로 아래 방식으로 동작합니다.
+
+```python
+from IPython.display import Image, display
+
+try:
+    display(Image(supervisor.get_graph().draw_mermaid_png()))
+except Exception:
+    print(supervisor.get_graph().draw_ascii())
+```
+
+같은 헬퍼는 `custom_supervisor` 같은 다른 compiled graph 객체에도 그대로 사용할 수 있습니다.
+
+```python
+custom_supervisor = build_graph()
+display_graph(custom_supervisor)
+```
+
 ## Directory Structure
 
 ```text
