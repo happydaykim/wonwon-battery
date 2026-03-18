@@ -27,6 +27,17 @@ USED_FOR_BY_SCOPE: dict[str, str] = {
     "LGES": "lges_analysis",
     "CATL": "catl_analysis",
 }
+VALID_DOC_TYPES = {
+    "industry_report",
+    "annual_report",
+    "ir_deck",
+    "press_release",
+    "news",
+    "paper",
+    "other",
+}
+VALID_COMPANY_SCOPES = {"MARKET", "LGES", "CATL", "BOTH"}
+VALID_STANCES = {"neutral", "positive", "risk"}
 
 logger = get_logger(__name__)
 
@@ -146,7 +157,7 @@ def merge_retrieval_results(
     local_results: list[NormalizedResult],
     web_results: MergedRetrievalResults,
 ) -> MergedRetrievalResults:
-    """Merge local and web results into stance buckets with URL-based dedupe."""
+    """Merge local and web results into stance buckets with origin-aware dedupe."""
     merged: MergedRetrievalResults = {
         "positive_results": [],
         "risk_results": [],
@@ -305,32 +316,45 @@ def build_retrieval_artifacts(
 
     for bucket in ("positive_results", "risk_results"):
         for result in merged_results.get(bucket, []):
-            doc_id = _build_doc_id(result)
-            evidence_id = f"evidence_{doc_id}"
+            doc_id = _resolve_document_id(result)
+            evidence_id = _build_evidence_id(result, doc_id=doc_id)
 
-            documents[doc_id] = {
-                "doc_id": doc_id,
-                "title": result.get("title") or "Untitled news result",
-                "source_name": result.get("source") or "GoogleNews",
-                "source_url": result.get("link"),
-                "published_at": result.get("published_at"),
-                "doc_type": "news",
-                "company_scope": company_scope,
-                "stance": result.get("stance", "neutral"),
-            }
+            if doc_id not in documents:
+                documents[doc_id] = {
+                    "doc_id": doc_id,
+                    "title": result.get("title") or "Untitled result",
+                    "source_name": _resolve_source_name(result),
+                    "source_url": result.get("link"),
+                    "published_at": result.get("published_at"),
+                    "doc_type": _resolve_doc_type(result),
+                    "company_scope": _resolve_company_scope(
+                        result,
+                        default_scope=company_scope,
+                    ),
+                    "stance": _resolve_stance(result),
+                }
+                document_ids.append(doc_id)
+
+            if evidence_id in evidence:
+                continue
+
             evidence[evidence_id] = {
                 "evidence_id": evidence_id,
                 "doc_id": doc_id,
-                "topic": result.get("query") or "news_result",
-                "topic_tags": list(result.get("topic_tags", [])),
-                "claim": result.get("article_excerpt") or result.get("title") or "Untitled claim",
+                "topic": result.get("query") or "retrieval_result",
+                "topic_tags": _normalize_topic_tags(result.get("topic_tags")),
+                "claim": (
+                    result.get("article_excerpt")
+                    or result.get("snippet")
+                    or result.get("title")
+                    or "Untitled claim"
+                ),
                 "excerpt": result.get("article_excerpt") or result.get("snippet"),
                 "full_text": result.get("article_text"),
-                "page_or_chunk": None,
-                "relevance_score": None,
+                "page_or_chunk": _resolve_page_or_chunk(result),
+                "relevance_score": _resolve_relevance_score(result),
                 "used_for": used_for,
             }
-            document_ids.append(doc_id)
             evidence_ids.append(evidence_id)
 
     return RetrievalArtifacts(
@@ -414,21 +438,35 @@ def build_normalized_results_from_artifacts(
 
         normalized_results.append(
             {
+                "doc_id": document["doc_id"],
                 "title": document["title"],
                 "link": document["source_url"],
                 "source": document["source_name"],
                 "source_name": document["source_name"],
                 "published_at": document["published_at"],
+                "doc_type": document["doc_type"],
+                "company_scope": document["company_scope"],
                 "query": evidence_item["topic"],
-                "snippet": evidence_item.get("full_text") or evidence_item["excerpt"],
+                "snippet": evidence_item["excerpt"] or evidence_item.get("full_text"),
+                "article_excerpt": evidence_item["excerpt"],
+                "article_text": evidence_item.get("full_text"),
                 "stance": document["stance"],
                 "topic_tags": evidence_item.get("topic_tags")
                 or infer_topic_tags(
                     evidence_item["topic"],
                     stance=document["stance"],
                 ),
+                "page_or_chunk": evidence_item.get("page_or_chunk"),
+                "relevance_score": evidence_item.get("relevance_score"),
+                "retrieval_origin": (
+                    "local_rag"
+                    if evidence_item.get("relevance_score") is not None
+                    else "web_search"
+                ),
             }
         )
+        if evidence_item.get("relevance_score") is not None and evidence_id.startswith("evidence_"):
+            normalized_results[-1]["chunk_id"] = evidence_id.removeprefix("evidence_")
 
     return normalized_results
 
@@ -487,10 +525,21 @@ def _collect_local_results(
             )
             for result in results:
                 normalized_result = dict(result)
-                normalized_result.setdefault("query", query)
-                normalized_result.setdefault("stance", stance)
-                if "topic_tags" not in normalized_result:
-                    normalized_result["topic_tags"] = infer_topic_tags(query, stance=stance)
+                normalized_result["query"] = query
+
+                resolved_stance = normalized_result.get("stance")
+                if not isinstance(resolved_stance, str) or not resolved_stance.strip():
+                    resolved_stance = stance
+                normalized_result["stance"] = resolved_stance
+                normalized_result["topic_tags"] = infer_topic_tags(
+                    query,
+                    stance=(
+                        resolved_stance
+                        if resolved_stance in {"positive", "risk"}
+                        else stance
+                    ),
+                )
+                normalized_result.setdefault("retrieval_origin", "local_rag")
                 local_results.append(normalized_result)
 
     return local_results
@@ -546,6 +595,21 @@ def _append_deduped_result(
 
 
 def _result_unique_key(result: NormalizedResult) -> str:
+    if _is_local_result(result):
+        chunk_id = result.get("chunk_id")
+        if chunk_id:
+            return f"local_chunk:{chunk_id}"
+
+        local_fallback = "|".join(
+            [
+                str(result.get("doc_id", "")).strip().lower(),
+                str(result.get("page_or_chunk", "")).strip().lower(),
+                str(result.get("query", "")).strip().lower(),
+            ]
+        )
+        if local_fallback.strip("|"):
+            return f"local_result:{local_fallback}"
+
     if result.get("link"):
         return str(result["link"]).strip().lower()
 
@@ -635,8 +699,16 @@ def _select_article_fetch_locations(
     *,
     max_documents: int,
 ) -> list[tuple[str, int]]:
-    positive_indexes = list(range(len(merged_results.get("positive_results", []))))
-    risk_indexes = list(range(len(merged_results.get("risk_results", []))))
+    positive_indexes = [
+        index
+        for index, result in enumerate(merged_results.get("positive_results", []))
+        if not result.get("article_text")
+    ]
+    risk_indexes = [
+        index
+        for index, result in enumerate(merged_results.get("risk_results", []))
+        if not result.get("article_text")
+    ]
 
     selected: list[tuple[str, int]] = []
     positive_quota = min(len(positive_indexes), (max_documents + 1) // 2)
@@ -657,6 +729,100 @@ def _select_article_fetch_locations(
         selected.extend(remaining[:remaining_capacity])
 
     return selected
+
+
+def _resolve_document_id(result: NormalizedResult) -> str:
+    if _is_local_result(result):
+        local_doc_id = str(result.get("doc_id") or "").strip()
+        if local_doc_id:
+            return local_doc_id
+    return _build_doc_id(result)
+
+
+def _build_evidence_id(result: NormalizedResult, *, doc_id: str) -> str:
+    if _is_local_result(result):
+        chunk_id = str(result.get("chunk_id") or "").strip()
+        if chunk_id:
+            return f"evidence_{chunk_id}"
+
+        seed = "|".join(
+            [
+                doc_id,
+                str(result.get("page_or_chunk") or "").strip(),
+                str(result.get("query") or "").strip(),
+            ]
+        )
+        return f"evidence_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+
+    return f"evidence_{doc_id}"
+
+
+def _is_local_result(result: NormalizedResult) -> bool:
+    if result.get("retrieval_origin") == "local_rag":
+        return True
+    if result.get("chunk_id"):
+        return True
+    return result.get("relevance_score") is not None
+
+
+def _resolve_source_name(result: NormalizedResult) -> str:
+    return (
+        str(result.get("source_name") or "").strip()
+        or str(result.get("source") or "").strip()
+        or "GoogleNews"
+    )
+
+
+def _resolve_doc_type(result: NormalizedResult) -> str:
+    doc_type = str(result.get("doc_type") or "").strip()
+    if doc_type in VALID_DOC_TYPES:
+        return doc_type
+    if _is_local_result(result):
+        return "other"
+    return "news"
+
+
+def _resolve_company_scope(
+    result: NormalizedResult,
+    *,
+    default_scope: Literal["MARKET", "LGES", "CATL"],
+) -> str:
+    resolved_scope = str(result.get("company_scope") or "").strip()
+    if resolved_scope in VALID_COMPANY_SCOPES:
+        return resolved_scope
+    return default_scope
+
+
+def _resolve_stance(result: NormalizedResult) -> str:
+    stance = str(result.get("stance") or "").strip()
+    if stance in VALID_STANCES:
+        return stance
+    return "neutral"
+
+
+def _normalize_topic_tags(value: Any) -> list[str]:
+    if isinstance(value, str):
+        normalized = value.strip()
+        return [normalized] if normalized else []
+    if isinstance(value, list):
+        return [
+            tag.strip()
+            for tag in value
+            if isinstance(tag, str) and tag.strip()
+        ]
+    return []
+
+
+def _resolve_page_or_chunk(result: NormalizedResult) -> str | None:
+    page_or_chunk = str(result.get("page_or_chunk") or "").strip()
+    return page_or_chunk or None
+
+
+def _resolve_relevance_score(result: NormalizedResult) -> float | None:
+    score = result.get("relevance_score")
+    if isinstance(score, (int, float)):
+        return float(score)
+    return None
 
 
 def _pick_distinct_queries(results: list[NormalizedResult], *, limit: int) -> list[str]:

@@ -1,4 +1,4 @@
-"""Retrieval stubs for local RAG and balanced web search."""
+"""Retrieval utilities for local RAG and balanced web search."""
 
 from retrieval.balanced_web_search import BalancedWebSearchClient
 from retrieval.local_rag import LocalRAGRetriever
