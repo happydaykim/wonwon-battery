@@ -75,7 +75,7 @@ Python 3.11, uv, OpenAI API, GitHub, Qwen Embedding, VL
 ├── schemas/                # 상태/데이터 스키마
 ├── tests/                  # 단위 테스트
 ├── utils/                  # 공통 유틸
-├── uv.lock                # uv lock 파일
+├── uv.lock                 # uv lock 파일
 └── README.md
 ```
 
