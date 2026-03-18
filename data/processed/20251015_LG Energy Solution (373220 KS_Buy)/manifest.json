@@ -1,0 +1,10 @@
+{
+  "doc_id": "20251015_LG Energy Solution (373220 KS_Buy)",
+  "pdf_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/pdfs/20251015_LG Energy Solution (373220 KS_Buy).pdf",
+  "page_count": 7,
+  "chunk_count": 40,
+  "pages_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/20251015_LG Energy Solution (373220 KS_Buy)/pages.jsonl",
+  "chunks_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/20251015_LG Energy Solution (373220 KS_Buy)/chunks.jsonl",
+  "collection_name": "battery_document",
+  "chroma_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/chroma"
+}
