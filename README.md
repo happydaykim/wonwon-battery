@@ -60,8 +60,9 @@ retrieval 정책은 아래 순서를 따릅니다.
 ## LLM Policy
 
 - `LLM_MODEL`: planner 등 일반 LLM 단계의 기본 모델
-- `REPORT_LLM_MODEL`: 보고서 품질이 직접 걸리는 `Compare / SWOT`, `Writer` 단계의 모델
-- 기본값은 `LLM_MODEL=gpt-4o-mini`, `REPORT_LLM_MODEL=gpt-4o`
+- `REPORT_LLM_MODEL`: `Compare / SWOT` 단계의 기본 보고서 모델
+- `WRITER_LLM_MODEL`: `Writer` 단계 전용 모델
+- 기본값은 `LLM_MODEL=gpt-4o-mini`, `REPORT_LLM_MODEL=gpt-4o`, `WRITER_LLM_MODEL=gpt-4o`
 
 ## Prompt Policy
 
