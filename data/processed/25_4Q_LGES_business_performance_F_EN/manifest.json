@@ -1,0 +1,10 @@
+{
+  "doc_id": "25_4Q_LGES_business_performance_F_EN",
+  "pdf_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/pdfs/25_4Q_LGES_business_performance_F_EN.pdf",
+  "page_count": 17,
+  "chunk_count": 35,
+  "pages_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/25_4Q_LGES_business_performance_F_EN/pages.jsonl",
+  "chunks_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/25_4Q_LGES_business_performance_F_EN/chunks.jsonl",
+  "collection_name": "battery_document",
+  "chroma_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/chroma"
+}

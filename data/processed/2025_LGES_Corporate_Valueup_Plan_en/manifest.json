@@ -1,0 +1,10 @@
+{
+  "doc_id": "2025_LGES_Corporate_Valueup_Plan_en",
+  "pdf_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/pdfs/2025_LGES_Corporate_Valueup_Plan_en.pdf",
+  "page_count": 11,
+  "chunk_count": 36,
+  "pages_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/2025_LGES_Corporate_Valueup_Plan_en/pages.jsonl",
+  "chunks_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/2025_LGES_Corporate_Valueup_Plan_en/chunks.jsonl",
+  "collection_name": "battery_document",
+  "chroma_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/chroma"
+}

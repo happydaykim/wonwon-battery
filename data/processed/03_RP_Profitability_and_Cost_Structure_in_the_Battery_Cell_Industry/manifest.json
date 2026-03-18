@@ -1,0 +1,10 @@
+{
+  "doc_id": "03_RP_Profitability_and_Cost_Structure_in_the_Battery_Cell_Industry",
+  "pdf_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/pdfs/03_RP_Profitability_and_Cost_Structure_in_the_Battery_Cell_Industry.pdf",
+  "page_count": 17,
+  "chunk_count": 88,
+  "pages_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/03_RP_Profitability_and_Cost_Structure_in_the_Battery_Cell_Industry/pages.jsonl",
+  "chunks_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/03_RP_Profitability_and_Cost_Structure_in_the_Battery_Cell_Industry/chunks.jsonl",
+  "collection_name": "battery_document",
+  "chroma_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/chroma"
+}
