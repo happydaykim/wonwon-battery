@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agents.base import build_agent_message, create_agent_blueprint
+from agents.base import build_agent_message
 from config.settings import load_settings
 from retrieval.article_fetcher import ArticleContentFetcher
 from retrieval.balanced_web_search import BalancedWebSearchClient
@@ -13,13 +13,7 @@ from retrieval.pipeline import (
 from retrieval.query_policy import build_company_query_policy
 from schemas.state import ReportState
 
-
-# Skeptic Agent: force counter-evidence and risk review for each company.
-SKEPTIC_BLUEPRINT = create_agent_blueprint(
-    name="skeptic_agent",
-    prompt_name="skeptic.md",
-    tools=["balanced_web_search"],
-)
+SKEPTIC_AGENT_NAME = "skeptic_agent"
 
 
 def skeptic_node(state: ReportState) -> dict:
@@ -38,7 +32,7 @@ def skeptic_node(state: ReportState) -> dict:
     web_search = BalancedWebSearchClient.from_settings(settings)
     article_fetcher = ArticleContentFetcher.from_settings(settings)
     company_state = state["companies"][company]
-    skeptic_results = run_skeptic_counter_retrieval(
+    skeptic_execution = run_skeptic_counter_retrieval(
         web_search_client=web_search,
         article_fetcher=article_fetcher,
         company_scope=company,
@@ -46,9 +40,11 @@ def skeptic_node(state: ReportState) -> dict:
         max_results_per_query=settings.google_news_max_results_per_query,
         article_fetch_max_documents=settings.article_fetch_max_documents,
         web_search_max_retries=settings.web_search_max_retries,
+        max_refinement_rounds=settings.retrieval_refinement_max_rounds,
+        max_new_queries_per_bucket=settings.retrieval_refinement_max_queries_per_bucket,
     )
     skeptic_artifacts = build_retrieval_artifacts(
-        merged_results=skeptic_results,
+        merged_results=skeptic_execution.merged_results,
         company_scope=company,
         used_for_override="counter_evidence",
     )
@@ -116,8 +112,14 @@ def skeptic_node(state: ReportState) -> dict:
 
     remaining_plan = state["plan"][1:]
     next_step = remaining_plan[0] if remaining_plan else None
+    query_history = _dedupe_ids(
+        [
+            *company_state.get("query_history", []),
+            *skeptic_execution.query_history,
+        ]
+    )
     message = build_agent_message(
-        SKEPTIC_BLUEPRINT.name,
+        SKEPTIC_AGENT_NAME,
         _build_skeptic_note(
             company=company,
             risk_query_count=len(query_policy["risk_queries"]),
@@ -143,6 +145,15 @@ def skeptic_node(state: ReportState) -> dict:
                 "retrieval_gaps": final_gaps,
                 "used_web_search": True,
                 "skeptic_review_completed": True,
+                "query_history": query_history,
+                "refinement_rounds": company_state.get("refinement_rounds", 0)
+                + skeptic_execution.refinement_rounds,
+                "decision_notes": _dedupe_ids(
+                    [
+                        *company_state.get("decision_notes", []),
+                        *skeptic_execution.decision_notes,
+                    ]
+                ),
                 "synthesized_summary": _append_skeptic_summary(
                     company_state["synthesized_summary"],
                     added_risk_evidence_count=len(skeptic_artifacts.evidence_ids),
@@ -154,7 +165,7 @@ def skeptic_node(state: ReportState) -> dict:
         "messages": state["messages"] + [message],
         "runtime": {
             **state["runtime"],
-            "current_phase": next_step or "done",
+            "current_phase": next_step or state["runtime"]["current_phase"],
             "termination_reason": None,
         },
     }

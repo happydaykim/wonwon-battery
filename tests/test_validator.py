@@ -12,7 +12,7 @@ class ValidatorTests(unittest.TestCase):
 
         result = validator_node(state)
 
-        self.assertEqual("done", result["runtime"]["current_phase"])
+        self.assertEqual("validate", result["runtime"]["current_phase"])
         self.assertEqual("validated", result["runtime"]["termination_reason"])
         self.assertEqual([], result["validation_issues"])
 
@@ -35,7 +35,7 @@ class ValidatorTests(unittest.TestCase):
 
         result = validator_node(state)
 
-        self.assertEqual("done", result["runtime"]["current_phase"])
+        self.assertEqual("validate", result["runtime"]["current_phase"])
         self.assertEqual("done_with_gaps", result["runtime"]["termination_reason"])
         self.assertTrue(all(not issue["retryable"] for issue in result["validation_issues"]))
 
@@ -46,7 +46,7 @@ class ValidatorTests(unittest.TestCase):
 
         result = validator_node(state)
 
-        self.assertEqual("done", result["runtime"]["current_phase"])
+        self.assertEqual("validate", result["runtime"]["current_phase"])
         self.assertEqual("max_revisions_reached", result["runtime"]["termination_reason"])
         self.assertTrue(any(issue["retryable"] for issue in result["validation_issues"]))
 

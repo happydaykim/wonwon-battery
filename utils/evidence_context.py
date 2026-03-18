@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from schemas.state import ReportState
 
 
@@ -65,6 +67,57 @@ def select_representative_evidence_ids(
         evidence_ids,
         limit=limit,
     )
+
+
+def format_quantitative_evidence_packet(
+    state: ReportState,
+    evidence_ids: list[str],
+    *,
+    limit: int,
+) -> str:
+    selected_ids = _select_representative_evidence_ids(
+        state,
+        evidence_ids,
+        limit=max(limit * 2, limit),
+    )
+    if not selected_ids:
+        return "- 정량 근거 없음"
+
+    lines: list[str] = []
+    seen_snippets: set[str] = set()
+
+    for evidence_id in selected_ids:
+        evidence_item = state["evidence"].get(evidence_id)
+        if evidence_item is None:
+            continue
+
+        document = state["documents"].get(evidence_item["doc_id"])
+        if document is None:
+            continue
+
+        numeric_snippets = _extract_numeric_snippets(
+            [
+                evidence_item["claim"],
+                evidence_item.get("excerpt"),
+                evidence_item.get("full_text"),
+            ]
+        )
+        if not numeric_snippets:
+            continue
+
+        source_name = document["source_name"] or "출처 미상"
+        published_at = document["published_at"] or "날짜 미상"
+        title = _compact_text(document["title"], limit=140)
+        for snippet in numeric_snippets:
+            normalized = " ".join(snippet.split())
+            if normalized in seen_snippets:
+                continue
+            seen_snippets.add(normalized)
+            lines.append(f"- [{source_name} | {published_at}] {title}: {normalized}")
+            if len(lines) >= limit:
+                return "\n".join(lines)
+
+    return "\n".join(lines) if lines else "- 정량 근거 없음"
 
 
 def _select_representative_evidence_ids(
@@ -234,3 +287,25 @@ def _compact_text(value: str, *, limit: int) -> str:
     if len(normalized) <= limit:
         return normalized
     return normalized[: limit - 3].rstrip() + "..."
+
+
+NUMERIC_PATTERN = re.compile(
+    r"(?i)(\d[\d,\.]*\s?(?:%|배|건|개|명|대|억|조|만|천|원|달러|억원|조원|GWh|MWh|kWh|Wh|GW|MW|kW|Ah|mAh|x|X|YoY|yoy|bp|bps)?)"
+)
+
+
+def _extract_numeric_snippets(values: list[str | None]) -> list[str]:
+    snippets: list[str] = []
+    for value in values:
+        if not value:
+            continue
+        for chunk in re.split(r"(?<=[\.\!\?])\s+|\n+", value):
+            normalized = " ".join(chunk.split())
+            if not normalized or not NUMERIC_PATTERN.search(normalized):
+                continue
+            snippets.append(_compact_text(normalized, limit=180))
+            if len(snippets) >= 2:
+                break
+        if len(snippets) >= 2:
+            break
+    return snippets

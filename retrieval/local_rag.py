@@ -12,7 +12,7 @@ from retrieval.vector_store import get_chroma_collection, query_collection
 
 @dataclass(slots=True)
 class LocalRAGRetriever:
-    """Placeholder interface for Chroma-backed local retrieval."""
+    """Chroma-backed local retriever that returns normalized retrieval results."""
 
     embedding_model: str
     vector_store: str
@@ -35,7 +35,7 @@ class LocalRAGRetriever:
         company_scope: str | None = None,
         top_k: int = 5,
     ) -> list[dict[str, Any]]:
-        """Query the shared Chroma collection with the shared embedding backend."""
+        """Query the shared Chroma collection and normalize each local hit."""
         collection = get_chroma_collection(
             chroma_dir=self.persist_directory,
             collection_name=self.collection_name,
@@ -51,16 +51,16 @@ class LocalRAGRetriever:
             top_k=overfetch_k,
         )
 
-        documents = result.get("documents", [[]])
-        metadatas = result.get("metadatas", [[]])
-        distances = result.get("distances", [[]])
+        documents = _first_query_batch(result.get("documents"))
+        metadatas = _first_query_batch(result.get("metadatas"))
+        distances = _first_query_batch(result.get("distances"))
 
         matches: list[dict[str, Any]] = []
         seen_doc_keys: set[str] = set()
         for document, metadata, distance in zip(
-            documents[0],
-            metadatas[0],
-            distances[0],
+            documents,
+            metadatas,
+            distances,
         ):
             normalized_metadata = dict(metadata or {})
             doc_key = (
@@ -74,12 +74,71 @@ class LocalRAGRetriever:
                 seen_doc_keys.add(str(doc_key))
             matches.append(
                 {
+                    **normalized_metadata,
+                    **_normalize_local_match(
+                        document=document,
+                        metadata=normalized_metadata,
+                        distance=distance,
+                    ),
                     "page_content": document,
                     "metadata": normalized_metadata,
                     "distance": distance,
-                    **normalized_metadata,
                 }
             )
             if len(matches) >= top_k:
                 break
         return matches
+
+
+def _normalize_local_match(
+    *,
+    document: str,
+    metadata: dict[str, Any],
+    distance: float | int | None,
+) -> dict[str, Any]:
+    content = document.strip()
+    excerpt = _build_excerpt(content)
+    source_name = (
+        metadata.get("source_name")
+        or metadata.get("source")
+        or "Local corpus"
+    )
+
+    return {
+        "doc_id": metadata.get("doc_id"),
+        "chunk_id": metadata.get("chunk_id"),
+        "page_or_chunk": metadata.get("page_or_chunk"),
+        "title": metadata.get("title")
+        or metadata.get("section_title")
+        or metadata.get("doc_id")
+        or "Untitled local document",
+        "source_name": source_name,
+        "source": source_name,
+        "link": metadata.get("source_url"),
+        "published_at": metadata.get("published_at"),
+        "doc_type": metadata.get("doc_type"),
+        "company_scope": metadata.get("company_scope"),
+        "stance": metadata.get("stance"),
+        "snippet": excerpt,
+        "article_excerpt": excerpt,
+        "article_text": content,
+        "relevance_score": float(distance) if distance is not None else None,
+        "retrieval_origin": "local_rag",
+    }
+
+
+def _first_query_batch(payload: Any) -> list[Any]:
+    if not isinstance(payload, list) or not payload:
+        return []
+
+    first_batch = payload[0]
+    if isinstance(first_batch, list):
+        return first_batch
+    return payload
+
+
+def _build_excerpt(content: str, *, limit: int = 400) -> str:
+    normalized = " ".join(content.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3].rstrip() + "..."

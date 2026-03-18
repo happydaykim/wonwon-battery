@@ -72,6 +72,9 @@ class TopicResearchState(TypedDict):
     retrieval_sufficient: bool
     retrieval_gaps: list[str]
     used_web_search: bool
+    query_history: list[str]
+    refinement_rounds: int
+    decision_notes: list[str]
 
 
 class CompanyResearchState(TypedDict):
@@ -85,6 +88,16 @@ class CompanyResearchState(TypedDict):
     used_web_search: bool
     skeptic_review_required: bool
     skeptic_review_completed: bool
+    query_history: list[str]
+    refinement_rounds: int
+    decision_notes: list[str]
+
+
+class SentenceCitation(TypedDict):
+    unit_text: str
+    unit_kind: Literal["sentence", "bullet", "table"]
+    evidence_ids: list[str]
+    reference_ids: list[str]
 
 
 class SectionDraft(TypedDict):
@@ -92,6 +105,7 @@ class SectionDraft(TypedDict):
     title: str
     content: str
     evidence_ids: list[str]
+    citations: list[SentenceCitation]
     status: Literal["pending", "drafted", "needs_revision", "approved"]
 
 

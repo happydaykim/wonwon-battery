@@ -4,8 +4,11 @@ from dataclasses import dataclass, field
 from hashlib import sha1
 from typing import Any, Literal
 
+from config.settings import load_settings
 from retrieval.article_fetcher import ArticleContentFetcher
 from retrieval.balanced_web_search import infer_topic_tags
+from retrieval.retrieval_decider import decide_retrieval_action
+from retrieval.query_refiner import refine_query_policy
 from schemas.state import EvidenceItem, SourceDocument
 from utils.logging import get_logger
 
@@ -27,6 +30,17 @@ USED_FOR_BY_SCOPE: dict[str, str] = {
     "LGES": "lges_analysis",
     "CATL": "catl_analysis",
 }
+VALID_DOC_TYPES = {
+    "industry_report",
+    "annual_report",
+    "ir_deck",
+    "press_release",
+    "news",
+    "paper",
+    "other",
+}
+VALID_COMPANY_SCOPES = {"MARKET", "LGES", "CATL", "BOTH"}
+VALID_STANCES = {"neutral", "positive", "risk"}
 
 logger = get_logger(__name__)
 
@@ -60,6 +74,10 @@ class RetrievalExecution:
     used_web_search: bool
     local_assessment: RetrievalAssessment
     final_assessment: RetrievalAssessment
+    query_history: list[str]
+    refinement_rounds: int
+    decision_notes: list[str]
+    refinement_notes: list[str]
 
 
 def is_retrieval_sufficient(
@@ -149,7 +167,7 @@ def merge_retrieval_results(
     local_results: list[NormalizedResult],
     web_results: MergedRetrievalResults,
 ) -> MergedRetrievalResults:
-    """Merge local and web results into stance buckets with URL-based dedupe."""
+    """Merge local and web results into stance buckets with origin-aware dedupe."""
     merged: MergedRetrievalResults = {
         "positive_results": [],
         "risk_results": [],
@@ -173,82 +191,329 @@ def run_two_stage_retrieval(
     rag_retriever: Any,
     web_search_client: Any,
     article_fetcher: ArticleContentFetcher | None,
-    retrieval_judge: Any | None,
+    retrieval_judge: Any | None = None,
     query_policy: dict[str, list[str]],
     company_scope: Literal["MARKET", "LGES", "CATL"],
     max_results_per_query: int,
     article_fetch_max_documents: int,
     document_search_max_retries: int = 0,
     web_search_max_retries: int = 0,
+    max_refinement_rounds: int | None = None,
+    max_new_queries_per_bucket: int | None = None,
 ) -> RetrievalExecution:
-    """Run local retrieval first, then fall back to web search when insufficient."""
+    """Run local retrieval with gap-driven query refinement before returning artifacts."""
+    settings = load_settings()
+    refinement_budget = (
+        settings.retrieval_refinement_max_rounds
+        if max_refinement_rounds is None
+        else max_refinement_rounds
+    )
+    refinement_query_limit = (
+        settings.retrieval_refinement_max_queries_per_bucket
+        if max_new_queries_per_bucket is None
+        else max_new_queries_per_bucket
+    )
     logger.info(
         "[%s] Starting retrieval: positive_queries=%d, risk_queries=%d",
         company_scope,
         len(query_policy.get("positive_queries", [])),
         len(query_policy.get("risk_queries", [])),
     )
-
-    local_results = _run_local_retrieval_with_retries(
-        rag_retriever=rag_retriever,
-        query_policy=query_policy,
-        company_scope=company_scope,
-        max_results_per_query=max_results_per_query,
-        max_retries=document_search_max_retries,
-    )
-    local_assessment = _assess_retrieval_results(
-        local_results,
-        company_scope=company_scope,
-        query_policy=query_policy,
-        stage="local",
-        retrieval_judge=retrieval_judge,
-    )
-    logger.info(
-        "[%s] Local RAG hits=%d, sufficient=%s, gaps=%s",
-        company_scope,
-        len(local_results),
-        local_assessment.sufficient,
-        local_assessment.gaps,
-    )
-    web_results: MergedRetrievalResults = {
+    cumulative_local_results: list[NormalizedResult] = []
+    cumulative_web_results: MergedRetrievalResults = {
         "positive_results": [],
         "risk_results": [],
     }
-    if not local_assessment.sufficient:
-        fallback_query_policy = _merge_query_policy_with_follow_up_queries(
-            query_policy,
-            positive_queries=local_assessment.follow_up_positive_queries,
-            risk_queries=local_assessment.follow_up_risk_queries,
-        )
+    query_history: list[str] = []
+    used_queries: set[str] = set()
+    decision_notes: list[str] = []
+    refinement_notes: list[str] = []
+    refinement_rounds = 0
+    active_query_policy = _sanitize_query_policy(query_policy)
+    round_index = 0
+    local_assessment = _build_empty_assessment(company_scope)
+    final_assessment = _build_empty_assessment(company_scope)
+
+    while True:
+        _record_query_history(query_history, used_queries, active_query_policy)
         logger.info(
-            "[%s] Judge suggested fallback queries: positive=%s risk=%s",
+            "[%s] Retrieval round %d executing queries: positive=%s, risk=%s",
             company_scope,
-            fallback_query_policy["positive_queries"],
-            fallback_query_policy["risk_queries"],
+            round_index + 1,
+            active_query_policy.get("positive_queries", []),
+            active_query_policy.get("risk_queries", []),
         )
-        if not local_results:
-            logger.info("[%s] Local RAG returned 0 hits. Falling back to web search.", company_scope)
-        else:
-            logger.info("[%s] Local RAG was insufficient. Falling back to web search.", company_scope)
-        web_results = _run_web_search_with_retries(
-            web_search_client=web_search_client,
-            positive_queries=fallback_query_policy.get("positive_queries", []),
-            risk_queries=fallback_query_policy.get("risk_queries", []),
+
+        round_local_results = _run_local_retrieval_with_retries(
+            rag_retriever=rag_retriever,
+            query_policy=active_query_policy,
+            company_scope=company_scope,
             max_results_per_query=max_results_per_query,
-            max_retries=web_search_max_retries,
+            max_retries=document_search_max_retries,
+        )
+        cumulative_local_results = _merge_flat_results(
+            cumulative_local_results,
+            round_local_results,
+        )
+        local_assessment = _assess_retrieval_results(
+            cumulative_local_results,
+            company_scope=company_scope,
+            query_policy=active_query_policy,
+            stage="local",
+            retrieval_judge=retrieval_judge,
         )
         logger.info(
-            "[%s] Web search hits: positive=%d, risk=%d",
+            "[%s] Local RAG hits=%d, sufficient=%s, gaps=%s",
             company_scope,
-            len(web_results["positive_results"]),
-            len(web_results["risk_results"]),
+            len(cumulative_local_results),
+            local_assessment.sufficient,
+            local_assessment.gaps,
         )
-    else:
-        logger.info("[%s] Local RAG was sufficient. Web search skipped.", company_scope)
+
+        round_web_results: MergedRetrievalResults = {
+            "positive_results": [],
+            "risk_results": [],
+        }
+
+        local_action = "stop"
+        if retrieval_judge is not None:
+            if local_assessment.sufficient:
+                decision_notes.append(
+                    "post_local:judge:stop:"
+                    + (
+                        local_assessment.judge_summary
+                        or "Judge marked local evidence sufficient."
+                    )
+                )
+                logger.info(
+                    "[%s] Retrieval judge marked local evidence sufficient. Web search skipped.",
+                    company_scope,
+                )
+            else:
+                merged_query_policy = _merge_query_policy_with_follow_up_queries(
+                    active_query_policy,
+                    positive_queries=local_assessment.follow_up_positive_queries,
+                    risk_queries=local_assessment.follow_up_risk_queries,
+                )
+                if merged_query_policy != active_query_policy:
+                    logger.info(
+                        "[%s] Judge suggested fallback queries: positive=%s risk=%s",
+                        company_scope,
+                        merged_query_policy["positive_queries"],
+                        merged_query_policy["risk_queries"],
+                    )
+                    active_query_policy = merged_query_policy
+                    _record_query_history(query_history, used_queries, active_query_policy)
+
+                local_action = "search_web"
+                decision_notes.append(
+                    "post_local:judge:search_web:"
+                    + (
+                        local_assessment.judge_summary
+                        or "; ".join(local_assessment.gaps)
+                        or "Judge requested broader evidence."
+                    )
+                )
+                if not cumulative_local_results:
+                    logger.info(
+                        "[%s] Local RAG returned 0 hits. Falling back to web search.",
+                        company_scope,
+                    )
+                else:
+                    logger.info(
+                        "[%s] Local RAG was insufficient. Falling back to web search.",
+                        company_scope,
+                    )
+                round_web_results = _run_web_search_with_retries(
+                    web_search_client=web_search_client,
+                    positive_queries=active_query_policy.get("positive_queries", []),
+                    risk_queries=active_query_policy.get("risk_queries", []),
+                    max_results_per_query=max_results_per_query,
+                    max_retries=web_search_max_retries,
+                )
+                logger.info(
+                    "[%s] Web search hits: positive=%d, risk=%d",
+                    company_scope,
+                    len(round_web_results["positive_results"]),
+                    len(round_web_results["risk_results"]),
+                )
+        else:
+            local_decision = decide_retrieval_action(
+                stage="post_local",
+                company_scope=company_scope,
+                assessment=local_assessment,
+                observed_results=cumulative_local_results,
+                current_query_policy=active_query_policy,
+                query_history=query_history,
+                used_web_search=bool(
+                    cumulative_web_results["positive_results"] or cumulative_web_results["risk_results"]
+                ),
+                refinement_rounds=refinement_rounds,
+                refinement_budget=refinement_budget,
+                settings=settings,
+            )
+            local_action = local_decision.action
+            decision_notes.append(
+                (
+                    f"post_local:{local_decision.decision_mode}:"
+                    f"{local_decision.action}:{local_decision.rationale}"
+                )
+            )
+            logger.info(
+                "[%s] Retrieval decision post_local: mode=%s, action=%s, rationale=%s",
+                company_scope,
+                local_decision.decision_mode,
+                local_decision.action,
+                local_decision.rationale,
+            )
+            if local_action == "search_web":
+                if not cumulative_local_results:
+                    logger.info(
+                        "[%s] Local RAG returned 0 hits. Falling back to web search.",
+                        company_scope,
+                    )
+                else:
+                    logger.info(
+                        "[%s] Local-first policy escalated to web search.",
+                        company_scope,
+                    )
+                round_web_results = _run_web_search_with_retries(
+                    web_search_client=web_search_client,
+                    positive_queries=active_query_policy.get("positive_queries", []),
+                    risk_queries=active_query_policy.get("risk_queries", []),
+                    max_results_per_query=max_results_per_query,
+                    max_retries=web_search_max_retries,
+                )
+                logger.info(
+                    "[%s] Web search hits: positive=%d, risk=%d",
+                    company_scope,
+                    len(round_web_results["positive_results"]),
+                    len(round_web_results["risk_results"]),
+                )
+            else:
+                logger.info("[%s] Web search skipped after local-first decision.", company_scope)
+
+        cumulative_web_results = _merge_bucketed_results(
+            cumulative_web_results,
+            round_web_results,
+        )
+        merged_results = merge_retrieval_results(
+            local_results=cumulative_local_results,
+            web_results=cumulative_web_results,
+        )
+        final_assessment = _assess_retrieval_results(
+            merged_results["positive_results"] + merged_results["risk_results"],
+            company_scope=company_scope,
+            query_policy=active_query_policy,
+            stage="final",
+            retrieval_judge=retrieval_judge,
+        )
+        if retrieval_judge is not None:
+            if final_assessment.sufficient:
+                if local_action == "search_web":
+                    decision_notes.append(
+                        "post_merge:judge:stop:"
+                        + (
+                            final_assessment.judge_summary
+                            or "Judge marked merged evidence sufficient."
+                        )
+                    )
+                break
+            if round_index >= refinement_budget:
+                decision_notes.append(
+                    "post_merge:fallback:stop:Refinement budget is exhausted after this round."
+                )
+                break
+            refinement_result = refine_query_policy(
+                company_scope=company_scope,
+                current_query_policy=active_query_policy,
+                assessment=final_assessment,
+                observed_results=merged_results["positive_results"] + merged_results["risk_results"],
+                used_queries=used_queries,
+                max_new_queries_per_bucket=refinement_query_limit,
+                settings=settings,
+            )
+            if not refinement_result.positive_queries and not refinement_result.risk_queries:
+                refinement_notes.append(refinement_result.rationale)
+                break
+
+            refinement_rounds += 1
+            refinement_notes.append(
+                (
+                    f"round_{refinement_rounds}:{refinement_result.refinement_mode}: "
+                    f"positive={refinement_result.positive_queries}, risk={refinement_result.risk_queries}"
+                )
+            )
+            active_query_policy = {
+                "positive_queries": refinement_result.positive_queries,
+                "risk_queries": refinement_result.risk_queries,
+            }
+            round_index += 1
+            continue
+
+        if local_action != "search_web":
+            break
+        if round_index >= refinement_budget:
+            decision_notes.append(
+                "post_merge:fallback:stop:Refinement budget is exhausted after this round."
+            )
+            break
+        merge_decision = decide_retrieval_action(
+            stage="post_merge",
+            company_scope=company_scope,
+            assessment=final_assessment,
+            observed_results=merged_results["positive_results"] + merged_results["risk_results"],
+            current_query_policy=active_query_policy,
+            query_history=query_history,
+            used_web_search=True,
+            refinement_rounds=refinement_rounds,
+            refinement_budget=refinement_budget,
+            settings=settings,
+        )
+        decision_notes.append(
+            (
+                f"post_merge:{merge_decision.decision_mode}:"
+                f"{merge_decision.action}:{merge_decision.rationale}"
+            )
+        )
+        logger.info(
+            "[%s] Retrieval decision post_merge: mode=%s, action=%s, rationale=%s",
+            company_scope,
+            merge_decision.decision_mode,
+            merge_decision.action,
+            merge_decision.rationale,
+        )
+        if merge_decision.action != "refine":
+            break
+        refinement_result = refine_query_policy(
+            company_scope=company_scope,
+            current_query_policy=active_query_policy,
+            assessment=final_assessment,
+            observed_results=merged_results["positive_results"] + merged_results["risk_results"],
+            used_queries=used_queries,
+            max_new_queries_per_bucket=refinement_query_limit,
+            settings=settings,
+        )
+        if not refinement_result.positive_queries and not refinement_result.risk_queries:
+            refinement_notes.append(refinement_result.rationale)
+            break
+
+        refinement_rounds += 1
+        refinement_notes.append(
+            (
+                f"round_{refinement_rounds}:{refinement_result.refinement_mode}: "
+                f"positive={refinement_result.positive_queries}, risk={refinement_result.risk_queries}"
+            )
+        )
+        active_query_policy = {
+            "positive_queries": refinement_result.positive_queries,
+            "risk_queries": refinement_result.risk_queries,
+        }
+        round_index += 1
 
     merged_results = merge_retrieval_results(
-        local_results=local_results,
-        web_results=web_results,
+        local_results=cumulative_local_results,
+        web_results=cumulative_web_results,
     )
     merged_results = enrich_results_with_article_content(
         merged_results,
@@ -262,19 +527,33 @@ def run_two_stage_retrieval(
         len(merged_results["positive_results"]),
         len(merged_results["risk_results"]),
     )
-    final_assessment = _assess_retrieval_results(
-        merged_results["positive_results"] + merged_results["risk_results"],
-        company_scope=company_scope,
-        query_policy=query_policy,
-        stage="final",
-        retrieval_judge=retrieval_judge,
-    )
+    if retrieval_judge is None:
+        local_assessment = _assess_retrieval_results(
+            cumulative_local_results,
+            company_scope=company_scope,
+            query_policy=active_query_policy,
+            stage="local",
+            retrieval_judge=retrieval_judge,
+        )
+        final_assessment = _assess_retrieval_results(
+            merged_results["positive_results"] + merged_results["risk_results"],
+            company_scope=company_scope,
+            query_policy=active_query_policy,
+            stage="final",
+            retrieval_judge=retrieval_judge,
+        )
     return RetrievalExecution(
-        local_results=local_results,
+        local_results=cumulative_local_results,
         merged_results=merged_results,
-        used_web_search=not local_assessment.sufficient,
+        used_web_search=bool(
+            cumulative_web_results["positive_results"] or cumulative_web_results["risk_results"]
+        ),
         local_assessment=local_assessment,
         final_assessment=final_assessment,
+        query_history=query_history,
+        refinement_rounds=refinement_rounds,
+        decision_notes=decision_notes,
+        refinement_notes=refinement_notes,
     )
 
 
@@ -287,20 +566,135 @@ def run_skeptic_counter_retrieval(
     max_results_per_query: int,
     article_fetch_max_documents: int,
     web_search_max_retries: int = 0,
-) -> MergedRetrievalResults:
-    """Run a single risk-focused web search pass for skeptic counter-evidence."""
-    results = _run_web_search_with_retries(
-        web_search_client=web_search_client,
-        positive_queries=[],
-        risk_queries=risk_queries,
-        max_results_per_query=max_results_per_query,
-        max_retries=web_search_max_retries,
+    max_refinement_rounds: int | None = None,
+    max_new_queries_per_bucket: int | None = None,
+) -> RetrievalExecution:
+    """Run a risk-focused web retrieval loop for skeptic counter-evidence."""
+    settings = load_settings()
+    refinement_budget = (
+        settings.retrieval_refinement_max_rounds
+        if max_refinement_rounds is None
+        else max_refinement_rounds
     )
-    return enrich_results_with_article_content(
-        results,
+    refinement_query_limit = (
+        settings.retrieval_refinement_max_queries_per_bucket
+        if max_new_queries_per_bucket is None
+        else max_new_queries_per_bucket
+    )
+    cumulative_web_results: MergedRetrievalResults = {
+        "positive_results": [],
+        "risk_results": [],
+    }
+    query_history: list[str] = []
+    used_queries: set[str] = set()
+    decision_notes: list[str] = []
+    refinement_notes: list[str] = []
+    refinement_rounds = 0
+    active_query_policy = {
+        "positive_queries": [],
+        "risk_queries": _sanitize_queries(risk_queries),
+    }
+    round_index = 0
+
+    while True:
+        _record_query_history(query_history, used_queries, active_query_policy)
+        round_results = _run_web_search_with_retries(
+            web_search_client=web_search_client,
+            positive_queries=[],
+            risk_queries=active_query_policy["risk_queries"],
+            max_results_per_query=max_results_per_query,
+            max_retries=web_search_max_retries,
+        )
+        cumulative_web_results = _merge_bucketed_results(
+            cumulative_web_results,
+            round_results,
+        )
+        final_assessment = evaluate_retrieval_results(
+            cumulative_web_results["positive_results"] + cumulative_web_results["risk_results"],
+            company_scope=company_scope,
+        )
+        if round_index >= refinement_budget:
+            decision_notes.append(
+                "risk_review:fallback:stop:Refinement budget is exhausted after this round."
+            )
+            break
+        risk_decision = decide_retrieval_action(
+            stage="risk_review",
+            company_scope=company_scope,
+            assessment=final_assessment,
+            observed_results=cumulative_web_results["positive_results"] + cumulative_web_results["risk_results"],
+            current_query_policy=active_query_policy,
+            query_history=query_history,
+            used_web_search=bool(
+                cumulative_web_results["positive_results"] or cumulative_web_results["risk_results"]
+            ),
+            refinement_rounds=refinement_rounds,
+            refinement_budget=refinement_budget,
+            settings=settings,
+            risk_only=True,
+        )
+        decision_notes.append(
+            (
+                f"risk_review:{risk_decision.decision_mode}:"
+                f"{risk_decision.action}:{risk_decision.rationale}"
+            )
+        )
+        logger.info(
+            "[%s] Retrieval decision risk_review: mode=%s, action=%s, rationale=%s",
+            company_scope,
+            risk_decision.decision_mode,
+            risk_decision.action,
+            risk_decision.rationale,
+        )
+        if risk_decision.action != "refine":
+            break
+
+        refinement_result = refine_query_policy(
+            company_scope=company_scope,
+            current_query_policy=active_query_policy,
+            assessment=final_assessment,
+            observed_results=cumulative_web_results["positive_results"] + cumulative_web_results["risk_results"],
+            used_queries=used_queries,
+            max_new_queries_per_bucket=refinement_query_limit,
+            settings=settings,
+            risk_only=True,
+        )
+        if not refinement_result.risk_queries:
+            refinement_notes.append(refinement_result.rationale)
+            break
+
+        refinement_rounds += 1
+        refinement_notes.append(
+            f"round_{refinement_rounds}:{refinement_result.refinement_mode}: risk={refinement_result.risk_queries}"
+        )
+        active_query_policy = {
+            "positive_queries": [],
+            "risk_queries": refinement_result.risk_queries,
+        }
+        round_index += 1
+
+    merged_results = enrich_results_with_article_content(
+        cumulative_web_results,
         article_fetcher=article_fetcher,
         max_documents=article_fetch_max_documents,
         company_scope=company_scope,
+    )
+    final_assessment = evaluate_retrieval_results(
+        merged_results["positive_results"] + merged_results["risk_results"],
+        company_scope=company_scope,
+    )
+    return RetrievalExecution(
+        local_results=[],
+        merged_results=merged_results,
+        used_web_search=bool(
+            merged_results["positive_results"] or merged_results["risk_results"]
+        ),
+        local_assessment=_build_empty_assessment(company_scope),
+        final_assessment=final_assessment,
+        query_history=query_history,
+        refinement_rounds=refinement_rounds,
+        decision_notes=decision_notes,
+        refinement_notes=refinement_notes,
     )
 
 
@@ -327,32 +721,45 @@ def build_retrieval_artifacts(
 
     for bucket in ("positive_results", "risk_results"):
         for result in merged_results.get(bucket, []):
-            doc_id = _build_doc_id(result)
-            evidence_id = f"evidence_{doc_id}"
+            doc_id = _resolve_document_id(result)
+            evidence_id = _build_evidence_id(result, doc_id=doc_id)
 
-            documents[doc_id] = {
-                "doc_id": doc_id,
-                "title": result.get("title") or "Untitled news result",
-                "source_name": result.get("source") or "GoogleNews",
-                "source_url": result.get("link"),
-                "published_at": result.get("published_at"),
-                "doc_type": "news",
-                "company_scope": company_scope,
-                "stance": result.get("stance", "neutral"),
-            }
+            if doc_id not in documents:
+                documents[doc_id] = {
+                    "doc_id": doc_id,
+                    "title": result.get("title") or "Untitled result",
+                    "source_name": _resolve_source_name(result),
+                    "source_url": result.get("link"),
+                    "published_at": result.get("published_at"),
+                    "doc_type": _resolve_doc_type(result),
+                    "company_scope": _resolve_company_scope(
+                        result,
+                        default_scope=company_scope,
+                    ),
+                    "stance": _resolve_stance(result),
+                }
+                document_ids.append(doc_id)
+
+            if evidence_id in evidence:
+                continue
+
             evidence[evidence_id] = {
                 "evidence_id": evidence_id,
                 "doc_id": doc_id,
-                "topic": result.get("query") or "news_result",
-                "topic_tags": list(result.get("topic_tags", [])),
-                "claim": result.get("article_excerpt") or result.get("title") or "Untitled claim",
+                "topic": result.get("query") or "retrieval_result",
+                "topic_tags": _normalize_topic_tags(result.get("topic_tags")),
+                "claim": (
+                    result.get("article_excerpt")
+                    or result.get("snippet")
+                    or result.get("title")
+                    or "Untitled claim"
+                ),
                 "excerpt": result.get("article_excerpt") or result.get("snippet"),
                 "full_text": result.get("article_text"),
-                "page_or_chunk": None,
-                "relevance_score": None,
+                "page_or_chunk": _resolve_page_or_chunk(result),
+                "relevance_score": _resolve_relevance_score(result),
                 "used_for": used_for,
             }
-            document_ids.append(doc_id)
             evidence_ids.append(evidence_id)
 
     return RetrievalArtifacts(
@@ -371,11 +778,14 @@ def summarize_retrieval(
     merged_results: MergedRetrievalResults,
     used_web_search: bool,
     final_assessment: RetrievalAssessment,
+    query_history: list[str],
+    refinement_rounds: int,
 ) -> str:
     """Build a structured content summary from the current retrieval stage."""
     positive_results = merged_results["positive_results"]
     risk_results = merged_results["risk_results"]
     all_results = positive_results + risk_results
+    query_note = ", ".join(f"'{query}'" for query in query_history[:6]) or "기록 없음"
 
     if not all_results:
         gap_text = "; ".join(final_assessment.gaps) if final_assessment.gaps else "근거 없음"
@@ -386,6 +796,8 @@ def summarize_retrieval(
                 "[검증 상태]",
                 f"- local_hits={len(local_results)}",
                 f"- web_search_used={used_web_search}",
+                f"- query_history={query_note}",
+                f"- refinement_rounds={refinement_rounds}",
                 f"- 남은 gap: {gap_text}",
             ]
         )
@@ -402,6 +814,9 @@ def summarize_retrieval(
                     else "local retrieval만으로 구성되었다."
                 )
             ),
+            "[검색 루프]",
+            f"- 실행 질의: {query_note}",
+            f"- refinement_rounds={refinement_rounds}",
             "[주요 긍정 근거]",
             _format_result_digest(positive_results, limit=2),
             "[주요 리스크 근거]",
@@ -436,23 +851,111 @@ def build_normalized_results_from_artifacts(
 
         normalized_results.append(
             {
+                "doc_id": document["doc_id"],
                 "title": document["title"],
                 "link": document["source_url"],
                 "source": document["source_name"],
                 "source_name": document["source_name"],
                 "published_at": document["published_at"],
+                "doc_type": document["doc_type"],
+                "company_scope": document["company_scope"],
                 "query": evidence_item["topic"],
-                "snippet": evidence_item.get("full_text") or evidence_item["excerpt"],
+                "snippet": evidence_item["excerpt"] or evidence_item.get("full_text"),
+                "article_excerpt": evidence_item["excerpt"],
+                "article_text": evidence_item.get("full_text"),
                 "stance": document["stance"],
                 "topic_tags": evidence_item.get("topic_tags")
                 or infer_topic_tags(
                     evidence_item["topic"],
                     stance=document["stance"],
                 ),
+                "page_or_chunk": evidence_item.get("page_or_chunk"),
+                "relevance_score": evidence_item.get("relevance_score"),
+                "retrieval_origin": (
+                    "local_rag"
+                    if evidence_item.get("relevance_score") is not None
+                    else "web_search"
+                ),
             }
         )
+        if evidence_item.get("relevance_score") is not None and evidence_id.startswith("evidence_"):
+            normalized_results[-1]["chunk_id"] = evidence_id.removeprefix("evidence_")
 
     return normalized_results
+
+
+def _build_empty_assessment(
+    company_scope: Literal["MARKET", "LGES", "CATL"],
+) -> RetrievalAssessment:
+    return evaluate_retrieval_results([], company_scope=company_scope)
+
+
+def _sanitize_query_policy(
+    query_policy: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    return {
+        "positive_queries": _sanitize_queries(query_policy.get("positive_queries", [])),
+        "risk_queries": _sanitize_queries(query_policy.get("risk_queries", [])),
+    }
+
+
+def _sanitize_queries(queries: list[str]) -> list[str]:
+    sanitized: list[str] = []
+    seen: set[str] = set()
+    for raw_query in queries:
+        query = " ".join(raw_query.split())
+        if not query:
+            continue
+        normalized = query.lower()
+        if normalized in seen:
+            continue
+        sanitized.append(query)
+        seen.add(normalized)
+    return sanitized
+
+
+def _record_query_history(
+    query_history: list[str],
+    used_queries: set[str],
+    query_policy: dict[str, list[str]],
+) -> None:
+    for bucket in ("positive_queries", "risk_queries"):
+        for query in query_policy.get(bucket, []):
+            normalized = query.lower()
+            if normalized in used_queries:
+                continue
+            query_history.append(query)
+            used_queries.add(normalized)
+
+
+def _merge_flat_results(
+    existing_results: list[NormalizedResult],
+    new_results: list[NormalizedResult],
+) -> list[NormalizedResult]:
+    merged_results: list[NormalizedResult] = []
+    seen_keys: set[str] = set()
+    for result in [*existing_results, *new_results]:
+        _append_deduped_result(merged_results, result, seen_keys)
+    return merged_results
+
+
+def _merge_bucketed_results(
+    existing_results: MergedRetrievalResults,
+    new_results: MergedRetrievalResults,
+) -> MergedRetrievalResults:
+    merged: MergedRetrievalResults = {
+        "positive_results": [],
+        "risk_results": [],
+    }
+    seen_keys: set[str] = set()
+
+    for bucket in ("positive_results", "risk_results"):
+        for result in existing_results.get(bucket, []):
+            _append_deduped_result(merged[bucket], result, seen_keys)
+        for result in new_results.get(bucket, []):
+            _append_deduped_result(merged[bucket], result, seen_keys)
+
+    return merged
 
 
 def _run_local_retrieval_with_retries(
@@ -515,7 +1018,14 @@ def _collect_local_results(
                         normalized_result.setdefault(key, value)
 
                 normalized_result["query"] = normalized_result.get("query") or query
-                normalized_result["stance"] = normalized_result.get("stance") or stance
+                resolved_stance = normalized_result.get("stance")
+                if not isinstance(resolved_stance, str) or not resolved_stance.strip():
+                    resolved_stance = stance
+                normalized_result["stance"] = resolved_stance
+                normalized_result["source_name"] = (
+                    normalized_result.get("source_name")
+                    or normalized_result.get("source")
+                )
                 normalized_result["source"] = (
                     normalized_result.get("source")
                     or normalized_result.get("source_name")
@@ -523,6 +1033,10 @@ def _collect_local_results(
                 normalized_result["link"] = (
                     normalized_result.get("link")
                     or normalized_result.get("source_url")
+                )
+                normalized_result["source_url"] = (
+                    normalized_result.get("source_url")
+                    or normalized_result.get("link")
                 )
                 normalized_result["title"] = (
                     normalized_result.get("title")
@@ -532,8 +1046,13 @@ def _collect_local_results(
                 if not normalized_result.get("topic_tags"):
                     normalized_result["topic_tags"] = infer_topic_tags(
                         query,
-                        stance=normalized_result["stance"],
+                        stance=(
+                            resolved_stance
+                            if resolved_stance in {"positive", "risk"}
+                            else stance
+                        ),
                     )
+                normalized_result.setdefault("retrieval_origin", "local_rag")
                 local_results.append(normalized_result)
 
     return local_results
@@ -687,6 +1206,21 @@ def _append_deduped_result(
 
 
 def _result_unique_key(result: NormalizedResult) -> str:
+    if _is_local_result(result):
+        chunk_id = result.get("chunk_id")
+        if chunk_id:
+            return f"local_chunk:{chunk_id}"
+
+        local_fallback = "|".join(
+            [
+                str(result.get("doc_id", "")).strip().lower(),
+                str(result.get("page_or_chunk", "")).strip().lower(),
+                str(result.get("query", "")).strip().lower(),
+            ]
+        )
+        if local_fallback.strip("|"):
+            return f"local_result:{local_fallback}"
+
     if result.get("link"):
         return str(result["link"]).strip().lower()
 
@@ -778,8 +1312,16 @@ def _select_article_fetch_locations(
     *,
     max_documents: int,
 ) -> list[tuple[str, int]]:
-    positive_indexes = list(range(len(merged_results.get("positive_results", []))))
-    risk_indexes = list(range(len(merged_results.get("risk_results", []))))
+    positive_indexes = [
+        index
+        for index, result in enumerate(merged_results.get("positive_results", []))
+        if not result.get("article_text")
+    ]
+    risk_indexes = [
+        index
+        for index, result in enumerate(merged_results.get("risk_results", []))
+        if not result.get("article_text")
+    ]
 
     selected: list[tuple[str, int]] = []
     positive_quota = min(len(positive_indexes), (max_documents + 1) // 2)
@@ -800,6 +1342,100 @@ def _select_article_fetch_locations(
         selected.extend(remaining[:remaining_capacity])
 
     return selected
+
+
+def _resolve_document_id(result: NormalizedResult) -> str:
+    if _is_local_result(result):
+        local_doc_id = str(result.get("doc_id") or "").strip()
+        if local_doc_id:
+            return local_doc_id
+    return _build_doc_id(result)
+
+
+def _build_evidence_id(result: NormalizedResult, *, doc_id: str) -> str:
+    if _is_local_result(result):
+        chunk_id = str(result.get("chunk_id") or "").strip()
+        if chunk_id:
+            return f"evidence_{chunk_id}"
+
+        seed = "|".join(
+            [
+                doc_id,
+                str(result.get("page_or_chunk") or "").strip(),
+                str(result.get("query") or "").strip(),
+            ]
+        )
+        return f"evidence_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+
+    return f"evidence_{doc_id}"
+
+
+def _is_local_result(result: NormalizedResult) -> bool:
+    if result.get("retrieval_origin") == "local_rag":
+        return True
+    if result.get("chunk_id"):
+        return True
+    return result.get("relevance_score") is not None
+
+
+def _resolve_source_name(result: NormalizedResult) -> str:
+    return (
+        str(result.get("source_name") or "").strip()
+        or str(result.get("source") or "").strip()
+        or "GoogleNews"
+    )
+
+
+def _resolve_doc_type(result: NormalizedResult) -> str:
+    doc_type = str(result.get("doc_type") or "").strip()
+    if doc_type in VALID_DOC_TYPES:
+        return doc_type
+    if _is_local_result(result):
+        return "other"
+    return "news"
+
+
+def _resolve_company_scope(
+    result: NormalizedResult,
+    *,
+    default_scope: Literal["MARKET", "LGES", "CATL"],
+) -> str:
+    resolved_scope = str(result.get("company_scope") or "").strip()
+    if resolved_scope in VALID_COMPANY_SCOPES:
+        return resolved_scope
+    return default_scope
+
+
+def _resolve_stance(result: NormalizedResult) -> str:
+    stance = str(result.get("stance") or "").strip()
+    if stance in VALID_STANCES:
+        return stance
+    return "neutral"
+
+
+def _normalize_topic_tags(value: Any) -> list[str]:
+    if isinstance(value, str):
+        normalized = value.strip()
+        return [normalized] if normalized else []
+    if isinstance(value, list):
+        return [
+            tag.strip()
+            for tag in value
+            if isinstance(tag, str) and tag.strip()
+        ]
+    return []
+
+
+def _resolve_page_or_chunk(result: NormalizedResult) -> str | None:
+    page_or_chunk = str(result.get("page_or_chunk") or "").strip()
+    return page_or_chunk or None
+
+
+def _resolve_relevance_score(result: NormalizedResult) -> float | None:
+    score = result.get("relevance_score")
+    if isinstance(score, (int, float)):
+        return float(score)
+    return None
 
 
 def _pick_distinct_queries(results: list[NormalizedResult], *, limit: int) -> list[str]:
