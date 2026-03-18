@@ -24,3 +24,6 @@ htmlcov/
 
 # Local Agent files
 AGENTS.md
+
+# Outputs
+outputs/
