@@ -9,7 +9,10 @@ from pydantic import BaseModel, Field
 from agents.base import build_agent_message, create_agent_blueprint
 from config.settings import load_settings
 from schemas.state import ReportState
-from utils.evidence_context import format_evidence_packet
+from utils.evidence_context import (
+    format_evidence_packet,
+    format_quantitative_evidence_packet,
+)
 from utils.logging import get_logger
 
 
@@ -77,7 +80,7 @@ def compare_swot_node(state: ReportState) -> dict:
         "messages": state["messages"] + [message],
         "runtime": {
             **state["runtime"],
-            "current_phase": next_step or "done",
+            "current_phase": next_step or state["runtime"]["current_phase"],
             "termination_reason": None,
         },
     }
@@ -111,10 +114,18 @@ def _build_comparison_context(state: ReportState) -> str:
             state["market"]["synthesized_summary"] or "정보 부족",
             "[시장 배경 근거]",
             format_evidence_packet(state, state["market"]["evidence_ids"], limit=8),
+            "[시장 배경 정량 근거]",
+            format_quantitative_evidence_packet(state, state["market"]["evidence_ids"], limit=5),
             "[LGES 요약]",
             state["companies"]["LGES"]["synthesized_summary"] or "정보 부족",
             "[LGES 근거]",
             format_evidence_packet(state, state["companies"]["LGES"]["evidence_ids"], limit=10),
+            "[LGES 정량 근거]",
+            format_quantitative_evidence_packet(
+                state,
+                state["companies"]["LGES"]["evidence_ids"],
+                limit=6,
+            ),
             "[LGES counter evidence]",
             format_evidence_packet(
                 state,
@@ -125,6 +136,12 @@ def _build_comparison_context(state: ReportState) -> str:
             state["companies"]["CATL"]["synthesized_summary"] or "정보 부족",
             "[CATL 근거]",
             format_evidence_packet(state, state["companies"]["CATL"]["evidence_ids"], limit=10),
+            "[CATL 정량 근거]",
+            format_quantitative_evidence_packet(
+                state,
+                state["companies"]["CATL"]["evidence_ids"],
+                limit=6,
+            ),
             "[CATL counter evidence]",
             format_evidence_packet(
                 state,

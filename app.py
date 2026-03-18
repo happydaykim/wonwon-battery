@@ -7,6 +7,9 @@ from uuid import uuid4
 
 from config.settings import Settings, load_settings
 from graph.builder import build_graph
+from retrieval.embeddings import load_embedding_backend
+from retrieval.local_rag import LocalRAGRetriever
+from retrieval.vector_store import get_chroma_collection
 from schemas.state import (
     CompanyResearchState,
     ReportState,
@@ -14,7 +17,7 @@ from schemas.state import (
     SWOTState,
     TopicResearchState,
 )
-from utils.logging import configure_langsmith
+from utils.logging import configure_langsmith, configure_runtime_logging, get_logger
 
 PLAN_STEP_LABELS = {
     "parallel_retrieval": "Parallel Retrieval Bundle (Market + LGES + CATL)",
@@ -24,6 +27,7 @@ PLAN_STEP_LABELS = {
     "write": "Writer",
     "validate": "Validator",
 }
+logger = get_logger(__name__)
 
 
 def _build_default_section_drafts() -> dict[str, SectionDraft]:
@@ -33,6 +37,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "SUMMARY",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "market_background": {
@@ -40,6 +45,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "시장 배경",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "lges_strategy": {
@@ -47,6 +53,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "LG에너지솔루션의 포트폴리오 다각화 전략과 핵심 경쟁력",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "catl_strategy": {
@@ -54,6 +61,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "CATL의 포트폴리오 다각화 전략과 핵심 경쟁력",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "strategy_comparison": {
@@ -61,6 +69,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "핵심 전략 비교 분석",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "swot": {
@@ -68,6 +77,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "SWOT 분석",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "implications": {
@@ -75,6 +85,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "종합 시사점",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "references": {
@@ -82,6 +93,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "REFERENCE",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
     }
@@ -95,6 +107,9 @@ def _build_default_market_state() -> TopicResearchState:
         "retrieval_sufficient": False,
         "retrieval_gaps": [],
         "used_web_search": False,
+        "query_history": [],
+        "refinement_rounds": 0,
+        "decision_notes": [],
     }
 
 
@@ -112,6 +127,9 @@ def _build_default_company_state(
         "used_web_search": False,
         "skeptic_review_required": False,
         "skeptic_review_completed": False,
+        "query_history": [],
+        "refinement_rounds": 0,
+        "decision_notes": [],
     }
 
 
@@ -176,12 +194,41 @@ def _write_final_report_markdown(
     return report_path
 
 
+def _prewarm_local_rag_resources(settings: Settings) -> None:
+    """Warm Chroma and embedding resources before parallel retrieval begins."""
+    if not settings.local_rag_prewarm_enabled:
+        logger.info("Local RAG prewarm is disabled by configuration.")
+        return
+
+    try:
+        local_rag = LocalRAGRetriever.from_settings(settings)
+        get_chroma_collection(
+            chroma_dir=local_rag.persist_directory,
+            collection_name=local_rag.collection_name,
+        )
+        load_embedding_backend(local_rag.embedding_model)
+    except Exception as exc:  # pragma: no cover - defensive startup guard
+        logger.warning("Local RAG prewarm failed. Runtime will fall back to lazy init: %s", exc)
+        return
+
+    logger.info(
+        "Local RAG resources prewarmed: collection=%s, chroma_dir=%s, embedding_model=%s",
+        local_rag.collection_name,
+        local_rag.persist_directory,
+        local_rag.embedding_model,
+    )
+
+
 def main() -> None:
     settings = load_settings()
+    configure_runtime_logging(
+        quiet_third_party_logs=settings.quiet_third_party_logs,
+    )
     configure_langsmith(
         settings.langsmith_project,
         enabled=settings.langsmith_enabled,
     )
+    _prewarm_local_rag_resources(settings)
     example_query = (
         "전기차 캐즘 환경에서 LG에너지솔루션과 CATL의 포트폴리오 다각화 전략을 비교 분석해줘."
     )

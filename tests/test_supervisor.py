@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from agents.supervisor import supervisor_node
 from app import build_initial_state
@@ -38,7 +39,11 @@ class SupervisorBranchingTests(unittest.TestCase):
                 state["companies"]["CATL"]["synthesized_summary"] = "catl done"
                 state["companies"]["CATL"]["retrieval_sufficient"] = catl_sufficient
 
-                result = supervisor_node(state)
+                with patch(
+                    "agents.supervisor._generate_supervisor_plan",
+                    return_value=(expected_plan, "test", "test rationale"),
+                ):
+                    result = supervisor_node(state)
 
                 self.assertEqual(expected_plan, result["plan"])
                 self.assertEqual(

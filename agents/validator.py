@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-from agents.base import build_agent_message, create_agent_blueprint
+from agents.base import build_agent_message
 from graph.router import has_revision_budget
 from schemas.state import ReportState, ValidationIssue
 
-
-# Validator Agent: inspect completeness and manage the revision loop.
-VALIDATOR_BLUEPRINT = create_agent_blueprint(
-    name="validator_agent",
-    prompt_name="validator.md",
-)
+VALIDATOR_AGENT_NAME = "validator_agent"
 
 SUMMARY_MAX_CHARS = 900
 SUMMARY_MIN_CHARS = 150
@@ -22,11 +17,6 @@ FINAL_REPORT_REQUIRED_HEADINGS = (
     "## 5.3 SWOT 분석",
     "## 6. 종합 시사점",
     "## 7. REFERENCE",
-)
-MARKET_REQUIRED_SUBHEADINGS = (
-    "### 2.1 전기차 캐즘과 HEV 피벗",
-    "### 2.2 K-배터리 업계의 포트폴리오 다각화 배경",
-    "### 2.3 CATL의 원가/기술 전략 변화",
 )
 COMPARISON_REQUIRED_SUBHEADINGS = (
     "### 5.1 전략 방향 차이",
@@ -118,6 +108,7 @@ def _build_validation_issues(state: ReportState) -> list[ValidationIssue]:
 
     issues.extend(_build_retrieval_gap_issues(state))
     issues.extend(_build_content_quality_issues(state))
+    issues.extend(_build_citation_issues(state))
     return issues
 
 
@@ -132,7 +123,7 @@ def validator_node(state: ReportState) -> dict:
     )
 
     if not issues:
-        runtime["current_phase"] = "done"
+        runtime["current_phase"] = remaining_plan[0] if remaining_plan else "validate"
         runtime["termination_reason"] = "validated"
         next_plan = remaining_plan
         note = "Validation passed with no remaining issues."
@@ -147,7 +138,7 @@ def validator_node(state: ReportState) -> dict:
             f"{len(non_retryable_issues)} non-retryable)."
         )
     else:
-        runtime["current_phase"] = "done"
+        runtime["current_phase"] = remaining_plan[0] if remaining_plan else "validate"
         next_plan = remaining_plan
         if retryable_issues:
             runtime["termination_reason"] = "max_revisions_reached"
@@ -162,7 +153,7 @@ def validator_node(state: ReportState) -> dict:
                 "The report is being finalized with explicit caveats."
             )
 
-    message = build_agent_message(VALIDATOR_BLUEPRINT.name, note)
+    message = build_agent_message(VALIDATOR_AGENT_NAME, note)
     return {
         "plan": next_plan,
         "validation_issues": issues,
@@ -270,18 +261,16 @@ def _build_content_quality_issues(state: ReportState) -> list[ValidationIssue]:
         )
 
     market_content = state["section_drafts"]["market_background"]["content"]
-    missing_market_subheadings = [
-        heading for heading in MARKET_REQUIRED_SUBHEADINGS if heading not in market_content
-    ]
-    if missing_market_subheadings:
+    market_subheadings = _extract_numbered_subheadings(market_content, prefix="### 2.")
+    if len(market_subheadings) < 2:
         issues.append(
             {
                 "issue_id": "market_subheadings_missing",
                 "section_id": "market_background",
                 "severity": "error",
-                "message": "Market background is missing one or more required subsections.",
+                "message": "Market background should include multiple writer-chosen numbered subsections.",
                 "related_evidence_ids": state["section_drafts"]["market_background"]["evidence_ids"],
-                "suggested_action": "Include 2.1, 2.2, and 2.3 subheadings explicitly.",
+                "suggested_action": "Add at least two meaningful `### 2.x` subsections and expand the section with evidence-backed prose.",
                 "retryable": True,
             }
         )
@@ -354,6 +343,65 @@ def _build_content_quality_issues(state: ReportState) -> list[ValidationIssue]:
     return issues
 
 
+def _build_citation_issues(state: ReportState) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+
+    for section_id in REQUIRED_SECTION_IDS:
+        if section_id == "references":
+            continue
+
+        section = state["section_drafts"][section_id]
+        content = section["content"].strip()
+        if not content or not section["evidence_ids"]:
+            continue
+
+        if not section.get("citations"):
+            issues.append(
+                {
+                    "issue_id": f"{section_id}_citations_missing",
+                    "section_id": section_id,
+                    "severity": "error",
+                    "message": "Section content does not retain sentence-level evidence citations.",
+                    "related_evidence_ids": section["evidence_ids"],
+                    "suggested_action": "Attach inline citations and sentence-evidence traces before finalizing the report.",
+                    "retryable": True,
+                }
+            )
+            continue
+
+        unresolved_reference_ids = sorted(
+            reference_id
+            for reference_id in {
+                reference_id
+                for citation in section.get("citations", [])
+                for reference_id in citation.get("reference_ids", [])
+            }
+            if reference_id not in state["references"]
+        )
+        if unresolved_reference_ids:
+            issues.append(
+                {
+                    "issue_id": f"{section_id}_inline_refs_unresolved",
+                    "section_id": section_id,
+                    "severity": "error",
+                    "message": "Section contains inline references that do not resolve in the REFERENCE section.",
+                    "related_evidence_ids": section["evidence_ids"],
+                    "suggested_action": "Rebuild references from the actually cited evidence/documents.",
+                    "retryable": True,
+                }
+            )
+
+    return issues
+
+
 def _is_reference_line_valid(line: str) -> bool:
     stripped = line.strip()
     return stripped.startswith("- ") and "*" in stripped and "http" in stripped
+
+
+def _extract_numbered_subheadings(content: str, *, prefix: str) -> list[str]:
+    return [
+        line.strip()
+        for line in content.splitlines()
+        if line.strip().startswith(prefix)
+    ]

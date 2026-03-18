@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from agents.skeptic import skeptic_node
@@ -63,6 +64,13 @@ class SkepticAgentTests(unittest.TestCase):
         ), patch(
             "agents.skeptic.ArticleContentFetcher.from_settings",
             return_value=_NoopArticleFetcher(),
+        ), patch(
+            "retrieval.pipeline.decide_retrieval_action",
+            return_value=SimpleNamespace(
+                action="stop",
+                decision_mode="test",
+                rationale="Stop after first skeptic round.",
+            ),
         ):
             result = skeptic_node(state)
 
@@ -87,6 +95,13 @@ class SkepticAgentTests(unittest.TestCase):
         ), patch(
             "agents.skeptic.ArticleContentFetcher.from_settings",
             return_value=_NoopArticleFetcher(),
+        ), patch(
+            "retrieval.pipeline.decide_retrieval_action",
+            return_value=SimpleNamespace(
+                action="stop",
+                decision_mode="test",
+                rationale="Stop after first skeptic round.",
+            ),
         ):
             result = skeptic_node(state)
 
