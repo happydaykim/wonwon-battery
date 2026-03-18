@@ -3,7 +3,7 @@
 ## Purpose
 
 이 저장소는 배터리 시장 전략 분석 멀티에이전트 시스템의 협업용 코드베이스다.
-현재 구현은 LangGraph/LangChain 기반 scaffold에서 한 단계 더 나아가, planner queue, LLM supervisor routing, local-first retrieval expansion decision, gap 기반 query refinement, Skeptic 재검증, Supervisor 단일 종료, 내부 provenance trace를 유지하는 한국어 Markdown 보고서 생성까지 연결된 상태다.
+현재 구현은 LangGraph/LangChain 기반 scaffold에서 한 단계 더 나아가, planner queue, LLM supervisor routing, local-first retrieval expansion decision, gap 기반 query refinement, Skeptic 재검증, Supervisor 단일 종료, 내부 provenance trace를 유지하는 한국어 보고서 본문 생성과 HTML/PDF export까지 연결된 상태다.
 
 이 문서는 이 저장소에서 작업하는 사람이나 코딩 에이전트가 현재 구조와 작업 원칙을 빠르게 이해하도록 돕기 위한 운영 가이드다.
 
@@ -72,9 +72,11 @@
 ## Report Generation Policy
 
 - 현재 보고서는 실제 사람이 읽는 한국어 전략 분석 보고서로 생성된다.
-- 최종 보고서는 Markdown 파일로 저장된다.
-  - 저장 경로: `outputs/{thread_id}_{YYYYMMDD_HHMMSS}.md`
+- 최종 산출물은 HTML/PDF 파일로 저장된다.
+  - 저장 경로: `outputs/{thread_id}_{YYYYMMDD_HHMMSS}.html`
+  - 저장 경로: `outputs/{thread_id}_{YYYYMMDD_HHMMSS}.pdf`
   - `outputs/`는 `.gitignore`에 포함되어 있으며 저장소에 커밋하지 않는다.
+- `final_report`는 내부적으로 writer/validator가 다루는 보고서 본문이며, export 단계에서 reader-facing HTML/PDF로 렌더된다.
 - 필수 목차는 아래 구조를 따른다.
   - `1. SUMMARY`
   - `2. 시장 배경`
@@ -87,6 +89,10 @@
     - `5.3 SWOT 분석`
   - `6. 종합 시사점`
   - `7. REFERENCE`
+- PDF export는 기본적으로 연속 문서 레이아웃을 사용한다.
+  - 보고서는 페이지별 대제목 고정 배치보다, 본문이 자연스럽게 이어지는 dense layout을 우선한다.
+  - 다만 제목 orphan, 표/행렬 단절, summary box 분리처럼 가독성이 크게 나빠지는 경우에는 제한적으로 page break를 허용한다.
+  - HTML과 PDF는 같은 section 순서를 유지하되, PDF는 print layout과 page-break-inside 제어만 추가한다.
 - `SUMMARY`는 executive summary이며 900자 이내로 관리한다.
 - `REFERENCE`는 실제로 사용한 자료만 남기며 일반 참고문헌 라인 형식으로 출력한다.
 - 최종 Markdown 본문에는 inline citation label을 노출하지 않는다.
@@ -130,7 +136,7 @@
   - 초기 상태를 만들고 그래프를 실행하는 entrypoint.
   - `PLAN_STEP_LABELS`와 `build_initial_state()`가 workflow queue 구조를 설명한다.
   - app startup 시 local RAG prewarm을 수행할 수 있다.
-  - 실행 종료 후 `final_report`가 있으면 Markdown 파일을 `outputs/`에 저장한다.
+  - 실행 종료 후 `final_report`가 있으면 HTML/PDF report artifact를 `outputs/`에 저장한다.
 - `graph/builder.py`
   - LangGraph 노드와 edge를 연결하는 핵심 파일.
   - `parallel_retrieval_dispatch` fan-out과 join, supervisor route, 모든 specialist의 supervisor 복귀 edge가 여기서 조립된다.
@@ -192,6 +198,10 @@
 - `utils/citation_linker.py`
   - 문장/불릿/표 단위 evidence trace를 section draft에 붙인다.
   - visible inline markup 없이 internal provenance만 남기는 정책이 여기 구현된다.
+- `utils/report_export.py`
+  - `final_report` 및 `section_drafts`를 reader-facing HTML/PDF artifact로 렌더한다.
+  - PDF에서는 주요 섹션이 새 페이지에서 시작되도록 page grouping과 print layout을 조정한다.
+  - 비교 섹션과 SWOT을 같은 PDF page group으로 묶어 기본 보고서 구조의 pagination을 안정화한다.
 - `config/settings.py`
   - 기본 LLM과 보고서용 LLM 설정을 함께 관리한다.
   - retrieval refinement budget도 여기서 관리한다.
@@ -225,7 +235,7 @@
 - prompt는 코드에 하드코딩하지 않는다.
   - 시스템 프롬프트는 `prompts/*.md`에 두고 agent는 loader를 통해 읽는다.
 - 출력 산출물은 저장소에 고정하지 않는다.
-  - `outputs/*.md`는 런타임 산출물이며 커밋하지 않는다.
+  - `outputs/*.html`, `outputs/*.pdf`는 런타임 산출물이며 커밋하지 않는다.
 - 실제 기업 분석 결과를 저장소에 고정하지 않는다.
   - scaffold 단계에서는 결론보다 구조, state 흐름, retrieval 연결이 우선이다.
 

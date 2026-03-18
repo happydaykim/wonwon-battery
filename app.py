@@ -232,11 +232,11 @@ def main() -> None:
     try:
         graph = build_graph(settings=settings)
     except RuntimeError as exc:
-        print(f"[placeholder] Graph compilation skipped: {exc}")
+        print(f"Graph compilation skipped because the runtime is not ready: {exc}")
         print(
-            "[placeholder] Install requirements.txt and configure .env before invoking the graph."
+            "Install dependencies and configure .env before invoking the graph."
         )
-        print(f"[placeholder] Initial state ready for query: {initial_state['user_query']}")
+        print(f"Initial state ready for query: {initial_state['user_query']}")
         return
 
     thread_id = f"battery-strategy-{uuid4().hex[:8]}"

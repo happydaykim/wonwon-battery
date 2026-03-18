@@ -20,7 +20,7 @@ from utils.evidence_context import (
 from utils.logging import get_logger
 
 
-# Writer Agent: organize the final report structure and placeholders.
+# Writer Agent: organize the final report structure and evidence-backed sections.
 WRITER_BLUEPRINT = create_agent_blueprint(
     name="writer_agent",
     prompt_name="writer.md",
@@ -426,49 +426,6 @@ def _accumulate_used_sections(
             if document is None or not _is_verifiable_reference(document):
                 continue
             used_sections_by_doc.setdefault(document["doc_id"], set()).add(section_id)
-
-
-def _company_section_evidence_ids(
-    state: ReportState,
-    company: str,
-) -> list[str]:
-    return _dedupe_ids(
-        [
-            *state["companies"][company]["evidence_ids"],
-            *state["companies"][company]["counter_evidence_ids"],
-        ]
-    )
-
-
-def _comparison_evidence_ids(state: ReportState) -> list[str]:
-    return _dedupe_ids(
-        [
-            *state["market"]["evidence_ids"],
-            *_company_section_evidence_ids(state, "LGES"),
-            *_company_section_evidence_ids(state, "CATL"),
-        ]
-    )
-
-
-def _swot_evidence_ids(state: ReportState) -> list[str]:
-    return _dedupe_ids(
-        [
-            *_company_section_evidence_ids(state, "LGES"),
-            *_company_section_evidence_ids(state, "CATL"),
-        ]
-    )
-
-
-def _implication_evidence_ids(state: ReportState) -> list[str]:
-    return _dedupe_ids(
-        [
-            *state["market"]["evidence_ids"],
-            *_company_section_evidence_ids(state, "LGES"),
-            *_company_section_evidence_ids(state, "CATL"),
-        ]
-    )
-
-
 def _build_swot_context(state: ReportState) -> str:
     lines: list[str] = []
     for company in ("LGES", "CATL"):

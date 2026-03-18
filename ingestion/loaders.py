@@ -67,30 +67,6 @@ def normalize_optional_metadata_value(value: Any) -> Any:
         return normalized
 
     return value
-
-
-def extract_page_documents(
-    pdf_path: Path,
-    base_metadata: dict[str, Any],
-    *,
-    use_vision: bool = False,
-    vision_model_id: str | None = None,
-    vision_max_new_tokens: int = 300,
-    show_progress: bool = True,
-) -> list[Document]:
-    """Extract one LangChain Document per PDF page."""
-    return list(
-        iter_page_documents(
-            pdf_path,
-            base_metadata,
-            use_vision=use_vision,
-            vision_model_id=vision_model_id,
-            vision_max_new_tokens=vision_max_new_tokens,
-            show_progress=show_progress,
-        )
-    )
-
-
 def iter_page_documents(
     pdf_path: Path,
     base_metadata: dict[str, Any],

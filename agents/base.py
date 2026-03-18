@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from utils.prompt_loader import load_prompt
 
@@ -29,29 +28,6 @@ def create_agent_blueprint(
         system_prompt=load_prompt(prompt_name),
         tools=tools or [],
     )
-
-
-def create_agent_wrapper(
-    blueprint: AgentBlueprint,
-    *,
-    llm: Any | None = None,
-) -> dict[str, Any]:
-    """
-    Placeholder factory for future LangChain agent wiring.
-
-    TODO:
-    - Replace this stub with langchain.agents.create_agent or an equivalent
-      factory once a real model client and tools are available.
-    """
-    return {
-        "name": blueprint.name,
-        "prompt_name": blueprint.prompt_name,
-        "system_prompt": blueprint.system_prompt,
-        "tools": blueprint.tools,
-        "llm": llm,
-    }
-
-
 def build_agent_message(agent_name: str, content: str) -> dict[str, str]:
     """Build a minimal trace message for the shared state."""
     return {
