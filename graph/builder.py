@@ -12,7 +12,7 @@ from agents.supervisor import supervisor_node
 from agents.validator import validator_node
 from agents.writer import writer_node
 from config.settings import Settings, load_settings
-from graph.router import route_supervisor, route_validator
+from graph.router import route_supervisor
 from schemas.state import ReportState
 
 
@@ -69,17 +69,7 @@ def build_graph(settings: Settings | None = None) -> Any:
         },
     )
 
-    for specialist in ("skeptic_agent", "compare_swot_agent"):
+    for specialist in ("skeptic_agent", "compare_swot_agent", "writer_agent", "validator_agent"):
         workflow.add_edge(specialist, "supervisor_agent")
-
-    workflow.add_edge("writer_agent", "validator_agent")
-    workflow.add_conditional_edges(
-        "validator_agent",
-        route_validator,
-        {
-            "pass": END,
-            "revise": "supervisor_agent",
-        },
-    )
 
     return workflow.compile(checkpointer=MemorySaver())

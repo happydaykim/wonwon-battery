@@ -16,5 +16,7 @@
 운영 원칙:
 - 한 번에 한 specialist만 호출한다.
 - 흐름은 queue semantics와 phase 순서를 유지한다.
+- 모든 specialist는 실행 후 다시 supervisor로 복귀한다.
+- workflow 종료는 supervisor가 빈 queue와 termination reason을 보고 최종 결정한다.
 - 실제 분석은 직접 수행하지 않는다.
 - 비어 있는 queue는 안전 종료로 해석한다.

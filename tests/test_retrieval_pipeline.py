@@ -122,6 +122,29 @@ class _FakeWebSearchClient:
         return _clone_merged_results(self._results)
 
 
+class _SequentialWebSearchClient:
+    def __init__(self, responses: list[dict[str, list[dict[str, Any]]]]) -> None:
+        self._responses = responses
+        self.calls: list[dict[str, Any]] = []
+
+    def search(
+        self,
+        *,
+        positive_queries: list[str],
+        risk_queries: list[str],
+        max_results_per_query: int = 3,
+    ) -> dict[str, list[dict[str, Any]]]:
+        self.calls.append(
+            {
+                "positive_queries": list(positive_queries),
+                "risk_queries": list(risk_queries),
+                "max_results_per_query": max_results_per_query,
+            }
+        )
+        index = min(len(self.calls) - 1, len(self._responses) - 1)
+        return _clone_merged_results(self._responses[index])
+
+
 class _RecordingArticleFetcher:
     def __init__(self) -> None:
         self.calls: list[str | None] = []
@@ -413,6 +436,73 @@ class RetrievalPipelineTests(unittest.TestCase):
         self.assertEqual(1, len(execution.merged_results["risk_results"]))
         self.assertTrue(execution.final_assessment.sufficient)
 
+    def test_run_two_stage_retrieval_refines_queries_when_gaps_remain(self) -> None:
+        query_policy = {
+            "positive_queries": [
+                "LG에너지솔루션 포트폴리오 다각화",
+            ],
+            "risk_queries": [],
+        }
+        rag_retriever = _FakeRAGRetriever({})
+        web_search_client = _SequentialWebSearchClient(
+            [
+                {
+                    "positive_results": [
+                        _result(
+                            title="LGES expands ESS footprint",
+                            source="WebSourceA",
+                            stance="positive",
+                            topic_tags=["strategy", "expansion"],
+                            query="LG에너지솔루션 포트폴리오 다각화",
+                            link="https://example.com/lges/web-positive",
+                        )
+                    ],
+                    "risk_results": [],
+                },
+                {
+                    "positive_results": [
+                        _result(
+                            title="LGES expands HEV and ESS demand",
+                            source="WebSourceC",
+                            stance="positive",
+                            topic_tags=["demand", "expansion"],
+                            query="LG에너지솔루션 ESS HEV 로봇 신규사업 확장",
+                            link="https://example.com/lges/web-positive-2",
+                        )
+                    ],
+                    "risk_results": [
+                        _result(
+                            title="LGES profitability pressure",
+                            source="WebSourceB",
+                            stance="risk",
+                            topic_tags=["risk"],
+                            query="LG에너지솔루션 수익성 압박 경쟁 리스크",
+                            link="https://example.com/lges/web-risk",
+                        )
+                    ],
+                },
+            ]
+        )
+        article_fetcher = _RecordingArticleFetcher()
+
+        execution = run_two_stage_retrieval(
+            rag_retriever=rag_retriever,
+            web_search_client=web_search_client,
+            article_fetcher=article_fetcher,
+            query_policy=query_policy,
+            company_scope="LGES",
+            max_results_per_query=3,
+            article_fetch_max_documents=4,
+            max_refinement_rounds=1,
+            max_new_queries_per_bucket=2,
+        )
+
+        self.assertEqual(2, len(web_search_client.calls))
+        self.assertEqual(1, execution.refinement_rounds)
+        self.assertGreater(len(execution.query_history), len(query_policy["positive_queries"]))
+        self.assertTrue(any("리스크" in query or "risk" in query.lower() for query in execution.query_history))
+        self.assertTrue(execution.final_assessment.sufficient)
+
     def test_local_artifacts_preserve_doc_and_chunk_level_context(self) -> None:
         merged_results = {
             "positive_results": [
@@ -531,9 +621,15 @@ class RetrievalPipelineTests(unittest.TestCase):
             merged_results=merged_results,
             used_web_search=True,
             final_assessment=assessment,
+            query_history=[
+                "LG에너지솔루션 포트폴리오 다각화",
+                "LG에너지솔루션 수익성 리스크",
+            ],
+            refinement_rounds=1,
         )
 
         self.assertIn("[핵심 요약]", summary)
+        self.assertIn("[검색 루프]", summary)
         self.assertIn("[주요 긍정 근거]", summary)
         self.assertIn("[주요 리스크 근거]", summary)
         self.assertIn("LGES expands ESS portfolio", summary)

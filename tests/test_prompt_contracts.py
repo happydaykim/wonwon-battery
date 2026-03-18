@@ -23,6 +23,7 @@ PROMPT_FILES = (
     "compare_swot.md",
     "writer.md",
     "validator.md",
+    "query_refiner.md",
 )
 
 

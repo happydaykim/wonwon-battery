@@ -77,7 +77,7 @@ def compare_swot_node(state: ReportState) -> dict:
         "messages": state["messages"] + [message],
         "runtime": {
             **state["runtime"],
-            "current_phase": next_step or "done",
+            "current_phase": next_step or state["runtime"]["current_phase"],
             "termination_reason": None,
         },
     }

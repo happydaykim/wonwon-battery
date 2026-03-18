@@ -37,6 +37,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "SUMMARY",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "market_background": {
@@ -44,6 +45,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "시장 배경",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "lges_strategy": {
@@ -51,6 +53,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "LG에너지솔루션의 포트폴리오 다각화 전략과 핵심 경쟁력",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "catl_strategy": {
@@ -58,6 +61,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "CATL의 포트폴리오 다각화 전략과 핵심 경쟁력",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "strategy_comparison": {
@@ -65,6 +69,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "핵심 전략 비교 분석",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "swot": {
@@ -72,6 +77,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "SWOT 분석",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "implications": {
@@ -79,6 +85,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "종합 시사점",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
         "references": {
@@ -86,6 +93,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
             "title": "REFERENCE",
             "content": "",
             "evidence_ids": [],
+            "citations": [],
             "status": "pending",
         },
     }
@@ -99,6 +107,8 @@ def _build_default_market_state() -> TopicResearchState:
         "retrieval_sufficient": False,
         "retrieval_gaps": [],
         "used_web_search": False,
+        "query_history": [],
+        "refinement_rounds": 0,
     }
 
 
@@ -116,6 +126,8 @@ def _build_default_company_state(
         "used_web_search": False,
         "skeptic_review_required": False,
         "skeptic_review_completed": False,
+        "query_history": [],
+        "refinement_rounds": 0,
     }
 
 

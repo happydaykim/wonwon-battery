@@ -118,6 +118,7 @@ def _build_validation_issues(state: ReportState) -> list[ValidationIssue]:
 
     issues.extend(_build_retrieval_gap_issues(state))
     issues.extend(_build_content_quality_issues(state))
+    issues.extend(_build_citation_issues(state))
     return issues
 
 
@@ -132,7 +133,7 @@ def validator_node(state: ReportState) -> dict:
     )
 
     if not issues:
-        runtime["current_phase"] = "done"
+        runtime["current_phase"] = remaining_plan[0] if remaining_plan else "validate"
         runtime["termination_reason"] = "validated"
         next_plan = remaining_plan
         note = "Validation passed with no remaining issues."
@@ -147,7 +148,7 @@ def validator_node(state: ReportState) -> dict:
             f"{len(non_retryable_issues)} non-retryable)."
         )
     else:
-        runtime["current_phase"] = "done"
+        runtime["current_phase"] = remaining_plan[0] if remaining_plan else "validate"
         next_plan = remaining_plan
         if retryable_issues:
             runtime["termination_reason"] = "max_revisions_reached"
@@ -347,6 +348,57 @@ def _build_content_quality_issues(state: ReportState) -> list[ValidationIssue]:
                     "message": "Section still contains placeholder language instead of finished report prose.",
                     "related_evidence_ids": state["section_drafts"][section_id]["evidence_ids"],
                     "suggested_action": "Rewrite the section as reader-facing report prose.",
+                    "retryable": True,
+                }
+            )
+
+    return issues
+
+
+def _build_citation_issues(state: ReportState) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+
+    for section_id in REQUIRED_SECTION_IDS:
+        if section_id == "references":
+            continue
+
+        section = state["section_drafts"][section_id]
+        content = section["content"].strip()
+        if not content or not section["evidence_ids"]:
+            continue
+
+        if not section.get("citations"):
+            issues.append(
+                {
+                    "issue_id": f"{section_id}_citations_missing",
+                    "section_id": section_id,
+                    "severity": "error",
+                    "message": "Section content does not retain sentence-level evidence citations.",
+                    "related_evidence_ids": section["evidence_ids"],
+                    "suggested_action": "Attach inline citations and sentence-evidence traces before finalizing the report.",
+                    "retryable": True,
+                }
+            )
+            continue
+
+        unresolved_reference_ids = sorted(
+            reference_id
+            for reference_id in {
+                reference_id
+                for citation in section.get("citations", [])
+                for reference_id in citation.get("reference_ids", [])
+            }
+            if reference_id not in state["references"]
+        )
+        if unresolved_reference_ids:
+            issues.append(
+                {
+                    "issue_id": f"{section_id}_inline_refs_unresolved",
+                    "section_id": section_id,
+                    "severity": "error",
+                    "message": "Section contains inline references that do not resolve in the REFERENCE section.",
+                    "related_evidence_ids": section["evidence_ids"],
+                    "suggested_action": "Rebuild references from the actually cited evidence/documents.",
                     "retryable": True,
                 }
             )

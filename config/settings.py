@@ -47,6 +47,8 @@ class Settings:
     article_fetch_char_limit: int
     document_search_max_retries: int
     web_search_max_retries: int
+    retrieval_refinement_max_rounds: int
+    retrieval_refinement_max_queries_per_bucket: int
     report_max_revisions: int
 
 
@@ -125,5 +127,11 @@ def load_settings() -> Settings:
             os.getenv("DOCUMENT_SEARCH_MAX_RETRIES", "2")
         ),
         web_search_max_retries=int(os.getenv("WEB_SEARCH_MAX_RETRIES", "1")),
+        retrieval_refinement_max_rounds=int(
+            os.getenv("RETRIEVAL_REFINEMENT_MAX_ROUNDS", "1")
+        ),
+        retrieval_refinement_max_queries_per_bucket=int(
+            os.getenv("RETRIEVAL_REFINEMENT_MAX_QUERIES_PER_BUCKET", "2")
+        ),
         report_max_revisions=int(os.getenv("REPORT_MAX_REVISIONS", "2")),
     )

@@ -42,6 +42,8 @@ def market_node(state: ReportState) -> dict:
         article_fetch_max_documents=settings.article_fetch_max_documents,
         document_search_max_retries=settings.document_search_max_retries,
         web_search_max_retries=settings.web_search_max_retries,
+        max_refinement_rounds=settings.retrieval_refinement_max_rounds,
+        max_new_queries_per_bucket=settings.retrieval_refinement_max_queries_per_bucket,
     )
     artifacts = build_retrieval_artifacts(
         merged_results=retrieval_execution.merged_results,
@@ -54,6 +56,8 @@ def market_node(state: ReportState) -> dict:
         merged_results=retrieval_execution.merged_results,
         used_web_search=retrieval_execution.used_web_search,
         final_assessment=retrieval_execution.final_assessment,
+        query_history=retrieval_execution.query_history,
+        refinement_rounds=retrieval_execution.refinement_rounds,
     )
     logger.info(
         "[MARKET] documents=%d, evidence=%d, final_sufficient=%s, gaps=%s, preview_titles=%s",
@@ -75,6 +79,8 @@ def market_node(state: ReportState) -> dict:
             "retrieval_sufficient": retrieval_execution.final_assessment.sufficient,
             "retrieval_gaps": retrieval_execution.final_assessment.gaps,
             "used_web_search": retrieval_execution.used_web_search,
+            "query_history": retrieval_execution.query_history,
+            "refinement_rounds": retrieval_execution.refinement_rounds,
         },
     }
 
