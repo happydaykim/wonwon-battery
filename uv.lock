@@ -4517,12 +4517,9 @@ name = "wonwon-battery"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-<<<<<<< Updated upstream
     { name = "httpx" },
-=======
     { name = "accelerate" },
     { name = "chromadb" },
->>>>>>> Stashed changes
     { name = "langchain" },
     { name = "langchain-chroma" },
     { name = "langchain-community" },
@@ -4541,12 +4538,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-<<<<<<< Updated upstream
     { name = "httpx", specifier = ">=0.28.1" },
-=======
     { name = "accelerate", specifier = ">=1.13.0" },
     { name = "chromadb", specifier = ">=1.5.5" },
->>>>>>> Stashed changes
     { name = "langchain", specifier = ">=0.3.0" },
     { name = "langchain-chroma", specifier = ">=1.1.0" },
     { name = "langchain-community", specifier = ">=0.4.1" },
