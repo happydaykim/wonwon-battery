@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
 from langchain.chat_models import init_chat_model
 from langchain_core.prompts import ChatPromptTemplate
@@ -10,6 +11,7 @@ from pydantic import BaseModel, Field
 from agents.base import build_agent_message, create_agent_blueprint
 from config.settings import load_settings
 from schemas.state import ReferenceEntry, ReportState, SectionDraft
+from utils.evidence_context import format_evidence_packet
 from utils.logging import get_logger
 
 
@@ -290,13 +292,13 @@ def _build_writer_context(
             "[시장 배경 요약]",
             state["market"]["synthesized_summary"] or "정보 부족",
             "[시장 배경 근거]",
-            _format_evidence_block(state, state["market"]["evidence_ids"], limit=10),
+            format_evidence_packet(state, state["market"]["evidence_ids"], limit=10),
             "[LGES 요약]",
             state["companies"]["LGES"]["synthesized_summary"] or "정보 부족",
             "[LGES 근거]",
-            _format_evidence_block(state, state["companies"]["LGES"]["evidence_ids"], limit=12),
+            format_evidence_packet(state, state["companies"]["LGES"]["evidence_ids"], limit=12),
             "[LGES counter evidence]",
-            _format_evidence_block(
+            format_evidence_packet(
                 state,
                 state["companies"]["LGES"]["counter_evidence_ids"],
                 limit=5,
@@ -304,9 +306,9 @@ def _build_writer_context(
             "[CATL 요약]",
             state["companies"]["CATL"]["synthesized_summary"] or "정보 부족",
             "[CATL 근거]",
-            _format_evidence_block(state, state["companies"]["CATL"]["evidence_ids"], limit=12),
+            format_evidence_packet(state, state["companies"]["CATL"]["evidence_ids"], limit=12),
             "[CATL counter evidence]",
-            _format_evidence_block(
+            format_evidence_packet(
                 state,
                 state["companies"]["CATL"]["counter_evidence_ids"],
                 limit=5,
@@ -319,40 +321,6 @@ def _build_writer_context(
             _build_references_content(references),
         ]
     )
-
-
-def _format_evidence_block(
-    state: ReportState,
-    evidence_ids: list[str],
-    *,
-    limit: int,
-) -> str:
-    if not evidence_ids:
-        return "- 정보 부족"
-
-    lines: list[str] = []
-    for evidence_id in evidence_ids[:limit]:
-        evidence_item = state["evidence"].get(evidence_id)
-        if evidence_item is None:
-            continue
-        document = state["documents"].get(evidence_item["doc_id"])
-        if document is None:
-            continue
-
-        excerpt = (evidence_item["excerpt"] or "excerpt 없음").replace("\n", " ")
-        lines.append(
-            "- "
-            + " | ".join(
-                [
-                    document["source_name"],
-                    document["published_at"] or "날짜 미상",
-                    document["title"],
-                    excerpt[:220],
-                ]
-            )
-        )
-
-    return "\n".join(lines) if lines else "- 정보 부족"
 
 
 def _build_swot_context(state: ReportState) -> str:
@@ -390,6 +358,8 @@ def _build_swot_content(state: ReportState) -> str:
 def _build_references(state: ReportState) -> dict[str, ReferenceEntry]:
     references: dict[str, ReferenceEntry] = {}
     for doc_id, document in sorted(state["documents"].items()):
+        if not _is_verifiable_reference(document):
+            continue
         ref_id = f"ref_{doc_id}"
         reference_type = _infer_reference_type(document["doc_type"])
         references[ref_id] = {
@@ -424,10 +394,13 @@ def _build_citation_text(
     reference_type: str,
 ) -> str:
     cleaned_title, inferred_site = _clean_title_and_site(document["title"])
-    source_name = document["source_name"] or inferred_site or "Unknown source"
-    if source_name == "GoogleNews RSS" and inferred_site:
-        source_name = inferred_site
     source_url = document["source_url"] or "URL 미확인"
+    source_name = (
+        _normalize_source_name(document["source_name"], source_url=source_url)
+        or inferred_site
+        or _infer_source_name_from_url(source_url)
+        or "Unknown source"
+    )
     published_at = document["published_at"] or datetime.now().strftime("%Y-%m-%d")
     year = published_at[:4] if len(published_at) >= 4 else "YYYY"
     title = cleaned_title
@@ -490,7 +463,7 @@ def _build_fallback_summary_content(state: ReportState) -> str:
 
 
 def _build_fallback_market_background_content(state: ReportState) -> str:
-    market_evidence = _format_evidence_block(state, state["market"]["evidence_ids"], limit=8)
+    market_evidence = format_evidence_packet(state, state["market"]["evidence_ids"], limit=8)
     gaps = "; ".join(state["market"]["retrieval_gaps"]) or "none"
     return "\n".join(
         [
@@ -509,8 +482,8 @@ def _build_fallback_market_background_content(state: ReportState) -> str:
 
 def _build_fallback_company_section_content(state: ReportState, company: str) -> str:
     company_state = state["companies"][company]
-    evidence_block = _format_evidence_block(state, company_state["evidence_ids"], limit=10)
-    counter_block = _format_evidence_block(state, company_state["counter_evidence_ids"], limit=5)
+    evidence_block = format_evidence_packet(state, company_state["evidence_ids"], limit=10)
+    counter_block = format_evidence_packet(state, company_state["counter_evidence_ids"], limit=5)
     gaps = "; ".join(company_state["retrieval_gaps"]) or "none"
     return "\n".join(
         [
@@ -583,3 +556,47 @@ def _clean_title_and_site(title: str) -> tuple[str, str | None]:
         return title, None
     clean_title, site = title.rsplit(" - ", maxsplit=1)
     return clean_title.strip(), site.strip()
+
+
+def _is_verifiable_reference(document: dict[str, str | None]) -> bool:
+    source_url = document.get("source_url")
+    if not source_url:
+        return False
+    parsed = urlparse(source_url)
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        return False
+    return hostname != "news.google.com"
+
+
+def _normalize_source_name(
+    source_name: str | None,
+    *,
+    source_url: str | None,
+) -> str | None:
+    cleaned = (source_name or "").strip()
+    if cleaned and cleaned not in {"GoogleNews RSS", "GoogleNews"}:
+        return cleaned
+    return _infer_source_name_from_url(source_url)
+
+
+def _infer_source_name_from_url(source_url: str | None) -> str | None:
+    if not source_url:
+        return None
+    parsed = urlparse(source_url)
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        return None
+    if hostname.startswith("www."):
+        hostname = hostname[4:]
+    if hostname.startswith("m."):
+        hostname = hostname[2:]
+    if hostname.endswith(".co.kr"):
+        hostname = hostname[: -len(".co.kr")]
+    elif "." in hostname:
+        hostname = hostname.rsplit(".", maxsplit=1)[0]
+
+    label = hostname.split(".")[-1]
+    if not label:
+        return None
+    return label.replace("-", " ").strip().title()

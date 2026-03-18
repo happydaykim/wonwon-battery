@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from agents.base import create_agent_blueprint
 from config.settings import load_settings
+from retrieval.article_fetcher import ArticleContentFetcher
 from retrieval.balanced_web_search import BalancedWebSearchClient
 from retrieval.local_rag import LocalRAGRetriever
 from retrieval.pipeline import (
@@ -30,12 +31,15 @@ def market_node(state: ReportState) -> dict:
     query_policy = build_market_query_policy()
     local_rag = LocalRAGRetriever.from_settings(settings)
     web_search = BalancedWebSearchClient.from_settings(settings)
+    article_fetcher = ArticleContentFetcher.from_settings(settings)
     retrieval_execution = run_two_stage_retrieval(
         rag_retriever=local_rag,
         web_search_client=web_search,
+        article_fetcher=article_fetcher,
         query_policy=query_policy,
         company_scope="MARKET",
         max_results_per_query=settings.google_news_max_results_per_query,
+        article_fetch_max_documents=settings.article_fetch_max_documents,
         document_search_max_retries=settings.document_search_max_retries,
         web_search_max_retries=settings.web_search_max_retries,
     )
@@ -44,6 +48,7 @@ def market_node(state: ReportState) -> dict:
         company_scope="MARKET",
     )
     summary = summarize_retrieval(
+        company_scope="MARKET",
         agent_name="market",
         local_results=retrieval_execution.local_results,
         merged_results=retrieval_execution.merged_results,

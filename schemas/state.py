@@ -49,8 +49,10 @@ class EvidenceItem(TypedDict):
     evidence_id: str
     doc_id: str
     topic: str
+    topic_tags: list[str]
     claim: str
     excerpt: str | None
+    full_text: str | None
     page_or_chunk: str | None
     relevance_score: float | None
     used_for: Literal[
