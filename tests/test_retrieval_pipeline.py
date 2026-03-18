@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from retrieval.pipeline import evaluate_retrieval_results, is_retrieval_sufficient
+from retrieval.pipeline import (
+    build_normalized_results_from_artifacts,
+    build_retrieval_artifacts,
+    evaluate_retrieval_results,
+    is_retrieval_sufficient,
+    summarize_retrieval,
+)
 
 
 def _result(
@@ -141,6 +147,70 @@ class RetrievalPipelineTests(unittest.TestCase):
         self.assertTrue(any(gap.startswith("source_diversity:") for gap in assessment.gaps))
         self.assertTrue(any(gap.startswith("stance_balance:") for gap in assessment.gaps))
         self.assertTrue(any(gap.startswith("required_topics:") for gap in assessment.gaps))
+
+    def test_summarize_retrieval_returns_structured_content_digest(self) -> None:
+        merged_results = {
+            "positive_results": [
+                _result(
+                    title="LGES expands ESS portfolio",
+                    source="SourceA",
+                    stance="positive",
+                    topic_tags=["strategy", "expansion"],
+                )
+            ],
+            "risk_results": [
+                _result(
+                    title="LGES faces profitability pressure",
+                    source="SourceB",
+                    stance="risk",
+                    topic_tags=["risk"],
+                )
+            ],
+        }
+        assessment = evaluate_retrieval_results(
+            merged_results["positive_results"] + merged_results["risk_results"],
+            company_scope="LGES",
+        )
+
+        summary = summarize_retrieval(
+            company_scope="LGES",
+            agent_name="lges",
+            local_results=[],
+            merged_results=merged_results,
+            used_web_search=True,
+            final_assessment=assessment,
+        )
+
+        self.assertIn("[핵심 요약]", summary)
+        self.assertIn("[주요 긍정 근거]", summary)
+        self.assertIn("[주요 리스크 근거]", summary)
+        self.assertIn("LGES expands ESS portfolio", summary)
+        self.assertIn("LGES faces profitability pressure", summary)
+
+    def test_topic_tags_survive_artifact_roundtrip(self) -> None:
+        merged_results = {
+            "positive_results": [
+                _result(
+                    title="CATL expands LFP strategy",
+                    source="SourceA",
+                    stance="positive",
+                    topic_tags=["strategy", "expansion"],
+                )
+            ],
+            "risk_results": [],
+        }
+
+        artifacts = build_retrieval_artifacts(
+            merged_results=merged_results,
+            company_scope="CATL",
+        )
+        normalized_results = build_normalized_results_from_artifacts(
+            documents=artifacts.documents,
+            evidence=artifacts.evidence,
+            evidence_ids=artifacts.evidence_ids,
+        )
+
+        self.assertEqual(["strategy", "expansion"], normalized_results[0]["topic_tags"])
 
 
 if __name__ == "__main__":
