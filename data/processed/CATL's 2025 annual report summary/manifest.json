@@ -2,7 +2,7 @@
   "doc_id": "CATL's 2025 annual report summary",
   "pdf_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/pdfs/CATL's 2025 annual report summary.pdf",
   "page_count": 2,
-  "chunk_count": 6,
+  "chunk_count": 7,
   "pages_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/CATL's 2025 annual report summary/pages.jsonl",
   "chunks_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/CATL's 2025 annual report summary/chunks.jsonl",
   "collection_name": "battery_document",

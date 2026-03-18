@@ -4,6 +4,7 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
+import re
 import time
 from typing import Any
 
@@ -152,19 +153,133 @@ def format_duration(seconds: float | None) -> str:
 
 
 def build_combined_text(source_text: str, visual_text: str | None) -> str:
-    """Combine extracted text with optional visual description."""
+    """Combine extracted text, vision text, and flattened table rows."""
     normalized_source = source_text.strip()
     normalized_visual = (visual_text or "").strip()
+    flattened_tables = flatten_table_sections(
+        [normalized_source, normalized_visual],
+    )
 
-    if normalized_source and normalized_visual:
-        return (
-            f"{normalized_source}\n\n"
-            "[VISUAL CONTENT]\n"
-            f"{normalized_visual}"
-        ).strip()
+    sections: list[str] = []
+    if normalized_source:
+        sections.append(normalized_source)
     if normalized_visual:
-        return f"[VISUAL CONTENT]\n{normalized_visual}".strip()
-    return normalized_source
+        sections.append(f"[VISUAL CONTENT]\n{normalized_visual}")
+    if flattened_tables:
+        sections.append("[TABLE FLATTENED]\n" + "\n".join(flattened_tables))
+    return "\n\n".join(section for section in sections if section).strip()
+
+
+def flatten_table_sections(texts: list[str]) -> list[str]:
+    """Convert markdown-like tables into row-wise key-value sentences."""
+    flattened_rows: list[str] = []
+    seen_rows: set[str] = set()
+    for text in texts:
+        if not text:
+            continue
+        for title, table_lines in extract_markdown_tables(text):
+            for row in flatten_markdown_table(table_lines, title=title):
+                if row not in seen_rows:
+                    seen_rows.add(row)
+                    flattened_rows.append(row)
+    return flattened_rows
+
+
+def extract_markdown_tables(text: str) -> list[tuple[str | None, list[str]]]:
+    """Extract contiguous markdown-style table blocks and nearby titles."""
+    lines = text.splitlines()
+    tables: list[tuple[str | None, list[str]]] = []
+    current_table: list[str] = []
+    last_non_table_line: str | None = None
+
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        if is_markdown_table_line(line):
+            if not current_table:
+                title = normalize_table_title(last_non_table_line)
+                tables.append((title, current_table))
+            current_table.append(line)
+            continue
+
+        if current_table:
+            current_table = []
+
+        normalized = line.strip()
+        if normalized:
+            last_non_table_line = normalized
+
+    return [(title, rows) for title, rows in tables if len(rows) >= 2]
+
+
+def is_markdown_table_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.count("|") < 2:
+        return False
+    return stripped.startswith("|") or stripped.endswith("|")
+
+
+def normalize_table_title(line: str | None) -> str | None:
+    if not line:
+        return None
+    normalized = " ".join(line.split()).strip(":")
+    if not normalized or len(normalized) > 120 or "|" in normalized:
+        return None
+    return normalized
+
+
+def flatten_markdown_table(
+    table_lines: list[str],
+    *,
+    title: str | None = None,
+) -> list[str]:
+    """Flatten a markdown table into search-friendly row descriptions."""
+    parsed_rows = [parse_markdown_table_row(line) for line in table_lines]
+    if len(parsed_rows) < 2 or not is_separator_row(parsed_rows[1]):
+        return []
+
+    headers = [normalize_table_cell(cell) for cell in parsed_rows[0]]
+    flattened_rows: list[str] = []
+    for row_index, raw_row in enumerate(parsed_rows[2:], start=1):
+        cells = [normalize_table_cell(cell) for cell in raw_row]
+        if not any(cells):
+            continue
+        pairs: list[str] = []
+        for cell_index, header in enumerate(headers):
+            if not header:
+                continue
+            value = cells[cell_index] if cell_index < len(cells) else ""
+            if not value:
+                continue
+            pairs.append(f"{header}: {value}")
+        if not pairs:
+            continue
+
+        prefix = "Table row"
+        if title:
+            prefix = f"{title} | row {row_index}"
+        flattened_rows.append(f"{prefix} | " + "; ".join(pairs))
+    return flattened_rows
+
+
+def parse_markdown_table_row(line: str) -> list[str]:
+    stripped = line.strip()
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|"):
+        stripped = stripped[:-1]
+    return [cell.strip() for cell in stripped.split("|")]
+
+
+def is_separator_row(cells: list[str]) -> bool:
+    if not cells:
+        return False
+    return all(re.fullmatch(r":?-{3,}:?", cell.strip()) for cell in cells if cell.strip())
+
+
+def normalize_table_cell(cell: str) -> str:
+    return " ".join(cell.split())
 
 
 def load_qwen_vision_backend(model_id: str | None = None) -> dict[str, Any]:
@@ -237,7 +352,9 @@ def analyze_page_with_qwen_vision(
             "You are reading a PDF page from a business document. "
             "Describe charts, tables, diagrams, callout boxes, and visually important "
             "content in a factual way. Include titles, axes, units, legends, and key "
-            "numbers when visible. Do not repeat the full body text. Keep the output concise."
+            "numbers when visible. For tables, preserve column names and add row-wise "
+            "key-value statements so the content is searchable as plain text. Do not "
+            "repeat the full body text. Keep the output concise."
         )
 
     pixmap = page.get_pixmap(matrix=fitz.Matrix(1.8, 1.8), alpha=False)

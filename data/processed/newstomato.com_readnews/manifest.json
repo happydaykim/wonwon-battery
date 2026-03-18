@@ -2,7 +2,7 @@
   "doc_id": "newstomato.com_readnews",
   "pdf_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/pdfs/newstomato.com_readnews.pdf",
   "page_count": 2,
-  "chunk_count": 5,
+  "chunk_count": 6,
   "pages_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/newstomato.com_readnews/pages.jsonl",
   "chunks_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/newstomato.com_readnews/chunks.jsonl",
   "collection_name": "battery_document",

@@ -2,7 +2,7 @@
   "doc_id": "Press Release - Insight -SNE Research",
   "pdf_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/pdfs/Press Release - Insight -SNE Research.pdf",
   "page_count": 4,
-  "chunk_count": 14,
+  "chunk_count": 15,
   "pages_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/Press Release - Insight -SNE Research/pages.jsonl",
   "chunks_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/Press Release - Insight -SNE Research/chunks.jsonl",
   "collection_name": "battery_document",
