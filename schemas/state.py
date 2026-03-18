@@ -74,6 +74,7 @@ class TopicResearchState(TypedDict):
     used_web_search: bool
     query_history: list[str]
     refinement_rounds: int
+    decision_notes: list[str]
 
 
 class CompanyResearchState(TypedDict):
@@ -89,6 +90,7 @@ class CompanyResearchState(TypedDict):
     skeptic_review_completed: bool
     query_history: list[str]
     refinement_rounds: int
+    decision_notes: list[str]
 
 
 class SentenceCitation(TypedDict):

@@ -109,6 +109,7 @@ def _build_default_market_state() -> TopicResearchState:
         "used_web_search": False,
         "query_history": [],
         "refinement_rounds": 0,
+        "decision_notes": [],
     }
 
 
@@ -128,6 +129,7 @@ def _build_default_company_state(
         "skeptic_review_completed": False,
         "query_history": [],
         "refinement_rounds": 0,
+        "decision_notes": [],
     }
 
 

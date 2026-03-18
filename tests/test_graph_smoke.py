@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from app import build_initial_state
 from graph.builder import build_graph
@@ -44,8 +44,40 @@ class GraphSmokeTests(unittest.TestCase):
                 "test",
             ),
         ), patch(
+            "agents.supervisor._generate_supervisor_plan",
+            side_effect=lambda state: (
+                (
+                    ["compare", "write", "validate"]
+                    if (
+                        state["plan"]
+                        and state["plan"][0] == "parallel_retrieval"
+                        and state["market"]["synthesized_summary"] is not None
+                        and state["companies"]["LGES"]["synthesized_summary"] is not None
+                        and state["companies"]["CATL"]["synthesized_summary"] is not None
+                    )
+                    else state["plan"]
+                ),
+                "test",
+                "graph smoke patch",
+            ),
+        ), patch(
             "retrieval.balanced_web_search.BalancedWebSearchClient.search",
             return_value={"positive_results": [], "risk_results": []},
+        ), patch(
+            "retrieval.pipeline.decide_retrieval_action",
+            return_value=SimpleNamespace(
+                action="stop",
+                decision_mode="test",
+                rationale="Stop retrieval for smoke test.",
+            ),
+        ), patch(
+            "retrieval.pipeline.refine_query_policy",
+            return_value=SimpleNamespace(
+                positive_queries=[],
+                risk_queries=[],
+                refinement_mode="test",
+                rationale="No refinement for smoke test.",
+            ),
         ), patch(
             "agents.compare_swot._create_compare_chain",
             return_value=_FakeChain(

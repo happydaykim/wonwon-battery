@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 from retrieval.pipeline import (
     build_normalized_results_from_artifacts,
@@ -337,15 +339,23 @@ class RetrievalPipelineTests(unittest.TestCase):
         )
         article_fetcher = _RecordingArticleFetcher()
 
-        execution = run_two_stage_retrieval(
-            rag_retriever=rag_retriever,
-            web_search_client=web_search_client,
-            article_fetcher=article_fetcher,
-            query_policy=query_policy,
-            company_scope="LGES",
-            max_results_per_query=3,
-            article_fetch_max_documents=4,
-        )
+        with patch(
+            "retrieval.pipeline.decide_retrieval_action",
+            return_value=SimpleNamespace(
+                action="stop",
+                decision_mode="test",
+                rationale="Local evidence is sufficient.",
+            ),
+        ):
+            execution = run_two_stage_retrieval(
+                rag_retriever=rag_retriever,
+                web_search_client=web_search_client,
+                article_fetcher=article_fetcher,
+                query_policy=query_policy,
+                company_scope="LGES",
+                max_results_per_query=3,
+                article_fetch_max_documents=4,
+            )
 
         self.assertTrue(execution.local_assessment.sufficient)
         self.assertTrue(execution.final_assessment.sufficient)
@@ -412,15 +422,30 @@ class RetrievalPipelineTests(unittest.TestCase):
         )
         article_fetcher = _RecordingArticleFetcher()
 
-        execution = run_two_stage_retrieval(
-            rag_retriever=rag_retriever,
-            web_search_client=web_search_client,
-            article_fetcher=article_fetcher,
-            query_policy=query_policy,
-            company_scope="LGES",
-            max_results_per_query=3,
-            article_fetch_max_documents=4,
-        )
+        with patch(
+            "retrieval.pipeline.decide_retrieval_action",
+            side_effect=[
+                SimpleNamespace(
+                    action="search_web",
+                    decision_mode="test",
+                    rationale="Need web coverage.",
+                ),
+                SimpleNamespace(
+                    action="stop",
+                    decision_mode="test",
+                    rationale="Merged coverage is sufficient.",
+                ),
+            ],
+        ):
+            execution = run_two_stage_retrieval(
+                rag_retriever=rag_retriever,
+                web_search_client=web_search_client,
+                article_fetcher=article_fetcher,
+                query_policy=query_policy,
+                company_scope="LGES",
+                max_results_per_query=3,
+                article_fetch_max_documents=4,
+            )
 
         self.assertFalse(execution.local_assessment.sufficient)
         self.assertTrue(execution.used_web_search)
@@ -485,17 +510,50 @@ class RetrievalPipelineTests(unittest.TestCase):
         )
         article_fetcher = _RecordingArticleFetcher()
 
-        execution = run_two_stage_retrieval(
-            rag_retriever=rag_retriever,
-            web_search_client=web_search_client,
-            article_fetcher=article_fetcher,
-            query_policy=query_policy,
-            company_scope="LGES",
-            max_results_per_query=3,
-            article_fetch_max_documents=4,
-            max_refinement_rounds=1,
-            max_new_queries_per_bucket=2,
-        )
+        with patch(
+            "retrieval.pipeline.decide_retrieval_action",
+            side_effect=[
+                SimpleNamespace(
+                    action="search_web",
+                    decision_mode="test",
+                    rationale="Need web coverage.",
+                ),
+                SimpleNamespace(
+                    action="refine",
+                    decision_mode="test",
+                    rationale="Need one more targeted round.",
+                ),
+                SimpleNamespace(
+                    action="search_web",
+                    decision_mode="test",
+                    rationale="Run the refined queries on web.",
+                ),
+                SimpleNamespace(
+                    action="stop",
+                    decision_mode="test",
+                    rationale="Coverage is now sufficient.",
+                ),
+            ],
+        ), patch(
+            "retrieval.pipeline.refine_query_policy",
+            return_value=SimpleNamespace(
+                positive_queries=["LG에너지솔루션 ESS HEV 로봇 신규사업 확장"],
+                risk_queries=["LG에너지솔루션 수익성 압박 경쟁 리스크"],
+                refinement_mode="test",
+                rationale="Refined via test patch.",
+            ),
+        ):
+            execution = run_two_stage_retrieval(
+                rag_retriever=rag_retriever,
+                web_search_client=web_search_client,
+                article_fetcher=article_fetcher,
+                query_policy=query_policy,
+                company_scope="LGES",
+                max_results_per_query=3,
+                article_fetch_max_documents=4,
+                max_refinement_rounds=1,
+                max_new_queries_per_bucket=2,
+            )
 
         self.assertEqual(2, len(web_search_client.calls))
         self.assertEqual(1, execution.refinement_rounds)

@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-from agents.base import build_agent_message, create_agent_blueprint
+from agents.base import build_agent_message
 from graph.router import has_revision_budget
 from schemas.state import ReportState, ValidationIssue
 
-
-# Validator Agent: inspect completeness and manage the revision loop.
-VALIDATOR_BLUEPRINT = create_agent_blueprint(
-    name="validator_agent",
-    prompt_name="validator.md",
-)
+VALIDATOR_AGENT_NAME = "validator_agent"
 
 SUMMARY_MAX_CHARS = 900
 SUMMARY_MIN_CHARS = 150
@@ -163,7 +158,7 @@ def validator_node(state: ReportState) -> dict:
                 "The report is being finalized with explicit caveats."
             )
 
-    message = build_agent_message(VALIDATOR_BLUEPRINT.name, note)
+    message = build_agent_message(VALIDATOR_AGENT_NAME, note)
     return {
         "plan": next_plan,
         "validation_issues": issues,

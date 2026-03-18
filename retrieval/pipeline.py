@@ -7,6 +7,7 @@ from typing import Any, Literal
 from config.settings import load_settings
 from retrieval.article_fetcher import ArticleContentFetcher
 from retrieval.balanced_web_search import infer_topic_tags
+from retrieval.retrieval_decider import decide_retrieval_action
 from retrieval.query_refiner import refine_query_policy
 from schemas.state import EvidenceItem, SourceDocument
 from utils.logging import get_logger
@@ -72,6 +73,7 @@ class RetrievalExecution:
     final_assessment: RetrievalAssessment
     query_history: list[str]
     refinement_rounds: int
+    decision_notes: list[str]
     refinement_notes: list[str]
 
 
@@ -221,6 +223,7 @@ def run_two_stage_retrieval(
     }
     query_history: list[str] = []
     used_queries: set[str] = set()
+    decision_notes: list[str] = []
     refinement_notes: list[str] = []
     refinement_rounds = 0
     active_query_policy = _sanitize_query_policy(query_policy)
@@ -257,16 +260,43 @@ def run_two_stage_retrieval(
             len(cumulative_local_results),
             local_assessment.sufficient,
         )
+        local_decision = decide_retrieval_action(
+            stage="post_local",
+            company_scope=company_scope,
+            assessment=local_assessment,
+            observed_results=cumulative_local_results,
+            current_query_policy=active_query_policy,
+            query_history=query_history,
+            used_web_search=bool(
+                cumulative_web_results["positive_results"] or cumulative_web_results["risk_results"]
+            ),
+            refinement_rounds=refinement_rounds,
+            refinement_budget=refinement_budget,
+            settings=settings,
+        )
+        decision_notes.append(
+            (
+                f"post_local:{local_decision.decision_mode}:"
+                f"{local_decision.action}:{local_decision.rationale}"
+            )
+        )
+        logger.info(
+            "[%s] Retrieval decision post_local: mode=%s, action=%s, rationale=%s",
+            company_scope,
+            local_decision.decision_mode,
+            local_decision.action,
+            local_decision.rationale,
+        )
 
         round_web_results: MergedRetrievalResults = {
             "positive_results": [],
             "risk_results": [],
         }
-        if not local_assessment.sufficient:
+        if local_decision.action == "search_web":
             if not cumulative_local_results:
                 logger.info("[%s] Local RAG returned 0 hits. Falling back to web search.", company_scope)
             else:
-                logger.info("[%s] Local RAG was insufficient. Falling back to web search.", company_scope)
+                logger.info("[%s] Local-first policy escalated to web search.", company_scope)
             round_web_results = _run_web_search_with_retries(
                 web_search_client=web_search_client,
                 positive_queries=active_query_policy.get("positive_queries", []),
@@ -281,7 +311,7 @@ def run_two_stage_retrieval(
                 len(round_web_results["risk_results"]),
             )
         else:
-            logger.info("[%s] Local RAG was sufficient. Web search skipped.", company_scope)
+            logger.info("[%s] Web search skipped after local-first decision.", company_scope)
 
         cumulative_web_results = _merge_bucketed_results(
             cumulative_web_results,
@@ -295,7 +325,39 @@ def run_two_stage_retrieval(
             merged_results["positive_results"] + merged_results["risk_results"],
             company_scope=company_scope,
         )
-        if final_assessment.sufficient or round_index >= refinement_budget:
+        if local_decision.action != "search_web":
+            break
+        if round_index >= refinement_budget:
+            decision_notes.append(
+                "post_merge:fallback:stop:Refinement budget is exhausted after this round."
+            )
+            break
+        merge_decision = decide_retrieval_action(
+            stage="post_merge",
+            company_scope=company_scope,
+            assessment=final_assessment,
+            observed_results=merged_results["positive_results"] + merged_results["risk_results"],
+            current_query_policy=active_query_policy,
+            query_history=query_history,
+            used_web_search=True,
+            refinement_rounds=refinement_rounds,
+            refinement_budget=refinement_budget,
+            settings=settings,
+        )
+        decision_notes.append(
+            (
+                f"post_merge:{merge_decision.decision_mode}:"
+                f"{merge_decision.action}:{merge_decision.rationale}"
+            )
+        )
+        logger.info(
+            "[%s] Retrieval decision post_merge: mode=%s, action=%s, rationale=%s",
+            company_scope,
+            merge_decision.decision_mode,
+            merge_decision.action,
+            merge_decision.rationale,
+        )
+        if merge_decision.action != "refine":
             break
 
         refinement_result = refine_query_policy(
@@ -358,6 +420,7 @@ def run_two_stage_retrieval(
         final_assessment=final_assessment,
         query_history=query_history,
         refinement_rounds=refinement_rounds,
+        decision_notes=decision_notes,
         refinement_notes=refinement_notes,
     )
 
@@ -392,6 +455,7 @@ def run_skeptic_counter_retrieval(
     }
     query_history: list[str] = []
     used_queries: set[str] = set()
+    decision_notes: list[str] = []
     refinement_notes: list[str] = []
     refinement_rounds = 0
     active_query_policy = {
@@ -417,7 +481,40 @@ def run_skeptic_counter_retrieval(
             cumulative_web_results["positive_results"] + cumulative_web_results["risk_results"],
             company_scope=company_scope,
         )
-        if final_assessment.sufficient or round_index >= refinement_budget:
+        if round_index >= refinement_budget:
+            decision_notes.append(
+                "risk_review:fallback:stop:Refinement budget is exhausted after this round."
+            )
+            break
+        risk_decision = decide_retrieval_action(
+            stage="risk_review",
+            company_scope=company_scope,
+            assessment=final_assessment,
+            observed_results=cumulative_web_results["positive_results"] + cumulative_web_results["risk_results"],
+            current_query_policy=active_query_policy,
+            query_history=query_history,
+            used_web_search=bool(
+                cumulative_web_results["positive_results"] or cumulative_web_results["risk_results"]
+            ),
+            refinement_rounds=refinement_rounds,
+            refinement_budget=refinement_budget,
+            settings=settings,
+            risk_only=True,
+        )
+        decision_notes.append(
+            (
+                f"risk_review:{risk_decision.decision_mode}:"
+                f"{risk_decision.action}:{risk_decision.rationale}"
+            )
+        )
+        logger.info(
+            "[%s] Retrieval decision risk_review: mode=%s, action=%s, rationale=%s",
+            company_scope,
+            risk_decision.decision_mode,
+            risk_decision.action,
+            risk_decision.rationale,
+        )
+        if risk_decision.action != "refine":
             break
 
         refinement_result = refine_query_policy(
@@ -464,6 +561,7 @@ def run_skeptic_counter_retrieval(
         final_assessment=final_assessment,
         query_history=query_history,
         refinement_rounds=refinement_rounds,
+        decision_notes=decision_notes,
         refinement_notes=refinement_notes,
     )
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from agents.base import create_agent_blueprint
 from config.settings import load_settings
 from retrieval.article_fetcher import ArticleContentFetcher
 from retrieval.balanced_web_search import BalancedWebSearchClient
@@ -13,14 +12,6 @@ from retrieval.pipeline import (
 from retrieval.query_policy import build_company_query_policy
 from schemas.state import ReportState
 from utils.logging import get_logger
-
-
-# CATL Agent: collect CATL strategy evidence and risk points.
-CATL_BLUEPRINT = create_agent_blueprint(
-    name="catl_agent",
-    prompt_name="catl.md",
-    tools=["local_rag", "balanced_web_search"],
-)
 
 logger = get_logger(__name__)
 
@@ -84,6 +75,7 @@ def catl_node(state: ReportState) -> dict:
                 "skeptic_review_completed": False,
                 "query_history": retrieval_execution.query_history,
                 "refinement_rounds": retrieval_execution.refinement_rounds,
+                "decision_notes": retrieval_execution.decision_notes,
             },
         },
     }

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agents.base import build_agent_message, create_agent_blueprint
+from agents.base import build_agent_message
 from config.settings import load_settings
 from retrieval.article_fetcher import ArticleContentFetcher
 from retrieval.balanced_web_search import BalancedWebSearchClient
@@ -13,13 +13,7 @@ from retrieval.pipeline import (
 from retrieval.query_policy import build_company_query_policy
 from schemas.state import ReportState
 
-
-# Skeptic Agent: force counter-evidence and risk review for each company.
-SKEPTIC_BLUEPRINT = create_agent_blueprint(
-    name="skeptic_agent",
-    prompt_name="skeptic.md",
-    tools=["balanced_web_search"],
-)
+SKEPTIC_AGENT_NAME = "skeptic_agent"
 
 
 def skeptic_node(state: ReportState) -> dict:
@@ -125,7 +119,7 @@ def skeptic_node(state: ReportState) -> dict:
         ]
     )
     message = build_agent_message(
-        SKEPTIC_BLUEPRINT.name,
+        SKEPTIC_AGENT_NAME,
         _build_skeptic_note(
             company=company,
             risk_query_count=len(query_policy["risk_queries"]),
@@ -154,6 +148,12 @@ def skeptic_node(state: ReportState) -> dict:
                 "query_history": query_history,
                 "refinement_rounds": company_state.get("refinement_rounds", 0)
                 + skeptic_execution.refinement_rounds,
+                "decision_notes": _dedupe_ids(
+                    [
+                        *company_state.get("decision_notes", []),
+                        *skeptic_execution.decision_notes,
+                    ]
+                ),
                 "synthesized_summary": _append_skeptic_summary(
                     company_state["synthesized_summary"],
                     added_risk_evidence_count=len(skeptic_artifacts.evidence_ids),
