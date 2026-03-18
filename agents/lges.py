@@ -52,6 +52,7 @@ def lges_node(state: ReportState) -> dict:
         final_assessment=retrieval_execution.final_assessment,
         query_history=retrieval_execution.query_history,
         refinement_rounds=retrieval_execution.refinement_rounds,
+        failure_notes=retrieval_execution.failure_notes,
     )
     logger.info(
         "[LGES] documents=%d, evidence=%d, final_sufficient=%s, gaps=%s, preview_titles=%s",
@@ -79,6 +80,7 @@ def lges_node(state: ReportState) -> dict:
                 "query_history": retrieval_execution.query_history,
                 "refinement_rounds": retrieval_execution.refinement_rounds,
                 "decision_notes": retrieval_execution.decision_notes,
+                "retrieval_failures": retrieval_execution.failure_notes,
             },
         },
     }

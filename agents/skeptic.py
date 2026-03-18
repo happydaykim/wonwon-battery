@@ -118,6 +118,12 @@ def skeptic_node(state: ReportState) -> dict:
             *skeptic_execution.query_history,
         ]
     )
+    retrieval_failures = _dedupe_ids(
+        [
+            *company_state.get("retrieval_failures", []),
+            *skeptic_execution.failure_notes,
+        ]
+    )
     message = build_agent_message(
         SKEPTIC_AGENT_NAME,
         _build_skeptic_note(
@@ -143,7 +149,7 @@ def skeptic_node(state: ReportState) -> dict:
                 "counter_evidence_ids": risk_evidence_ids,
                 "retrieval_sufficient": final_assessment.sufficient,
                 "retrieval_gaps": final_gaps,
-                "used_web_search": True,
+                "used_web_search": skeptic_execution.used_web_search,
                 "skeptic_review_completed": True,
                 "query_history": query_history,
                 "refinement_rounds": company_state.get("refinement_rounds", 0)
@@ -154,6 +160,7 @@ def skeptic_node(state: ReportState) -> dict:
                         *skeptic_execution.decision_notes,
                     ]
                 ),
+                "retrieval_failures": retrieval_failures,
                 "synthesized_summary": _append_skeptic_summary(
                     company_state["synthesized_summary"],
                     added_risk_evidence_count=len(skeptic_artifacts.evidence_ids),

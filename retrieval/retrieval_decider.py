@@ -33,6 +33,7 @@ class RetrievalAssessmentLike(Protocol):
     sufficient: bool
     gaps: list[str]
     evidence_count: int
+    coverage_count: int
     source_count: int
     positive_count: int
     risk_count: int
@@ -226,6 +227,7 @@ def _build_decision_context(
             f"refinement_budget={refinement_budget}",
             f"sufficient={assessment.sufficient}",
             f"evidence_count={assessment.evidence_count}",
+            f"coverage_count={assessment.coverage_count}",
             f"source_count={assessment.source_count}",
             f"positive_count={assessment.positive_count}",
             f"risk_count={assessment.risk_count}",

@@ -39,6 +39,20 @@ class ValidatorTests(unittest.TestCase):
         self.assertEqual("done_with_gaps", result["runtime"]["termination_reason"])
         self.assertTrue(all(not issue["retryable"] for issue in result["validation_issues"]))
 
+    def test_validator_surfaces_retrieval_execution_failures(self) -> None:
+        state = _build_valid_state()
+        state["market"]["retrieval_sufficient"] = False
+        state["market"]["retrieval_gaps"] = ["market gap"]
+        state["market"]["retrieval_failures"] = [
+            "web_search_failure: failed after 1 attempt(s): google news down"
+        ]
+
+        result = validator_node(state)
+
+        self.assertTrue(
+            any(issue["issue_id"] == "market_retrieval_failure" for issue in result["validation_issues"])
+        )
+
     def test_validator_stops_when_revision_budget_is_exhausted(self) -> None:
         state = _build_valid_state()
         state["runtime"]["revision_count"] = state["runtime"]["max_revisions"]

@@ -50,7 +50,10 @@
   - web search는 `langchain_teddynote.tools.GoogleNews` adapter를 통해 수행한다.
   - query는 한국어/영어 변형으로 이중 실행된다.
   - 결과는 `positive_results`, `risk_results`로 normalize 된다.
-  - retrieval state에는 `query_history`, `refinement_rounds`, `decision_notes`가 남아 이후 summary / validator / debugging에 사용된다.
+  - retrieval state에는 `query_history`, `refinement_rounds`, `decision_notes`, `retrieval_failures`가 남아 이후 summary / validator / debugging에 사용된다.
+  - `used_web_search`는 web search 결과가 남았는지가 아니라, web search를 실제로 한 번이라도 시도했는지를 뜻한다.
+  - local/web helper는 예외를 바로 터뜨리기보다 warning log + failure note + empty result로 내려와 supervisor 흐름을 유지한다.
+  - validator는 순수 정보 부족 gap과 retrieval execution failure를 구분해서 다룬다.
   - Skeptic도 risk-only web retrieval + refinement loop를 사용한다.
   - retrieval 단계는 콘솔 로그로 현재 진행 상황을 출력한다.
     - `Retrieval round N executing queries: ...`
@@ -62,10 +65,13 @@
     - `documents=..., evidence=..., preview_titles=[...]`
 - Sufficiency rule:
   - 최소 evidence 개수
+  - distinct coverage unit 개수
   - source 다양성
   - positive/risk 균형
   - scope별 필수 topic tag 커버리지
   - 위 조건 중 하나라도 부족하면 insufficient로 판단한다.
+  - web/news 결과는 같은 story title/date 반복이 coverage를 부풀리지 않도록 보수적으로 묶는다.
+  - local RAG는 문서 전체 1건으로 뭉개지지 않도록 chunk/page 단위 identity를 유지한다.
   - local 결과 sufficiency는 LLM decider의 입력으로 사용되며, web 확장 여부를 직접 강제하지는 않는다.
   - merged 결과 sufficiency는 refinement 지속 여부, supervisor 분기, validator 종료 판단의 주요 입력으로 사용된다.
 
@@ -144,17 +150,23 @@
   - `state["plan"]`의 현재 step을 실제 node name으로 매핑한다.
   - `Supervisor`만 `done -> END`로 나가며, `Validator`는 더 이상 직접 branch하지 않는다.
   - step 이름을 바꾸면 반드시 여기와 `app.py` label, 관련 agent를 같이 수정해야 한다.
+- `agents/__init__.py`, `graph/__init__.py`
+  - package import 시 하위 모듈을 eager import하지 않고 lazy export를 사용한다.
+  - direct module import와 test loader에서 circular import를 피하기 위한 안전장치다.
 - `schemas/state.py`
   - 전체 상태 스키마의 source of truth.
   - `documents`, `evidence`, `companies`는 병렬 retrieval merge를 위해 reducer를 사용한다.
-  - retrieval debug용 `query_history`, `refinement_rounds`, `decision_notes`와 내부 citation trace용 `SectionDraft.citations`도 여기 정의된다.
+  - retrieval debug용 `query_history`, `refinement_rounds`, `decision_notes`, `retrieval_failures`와 내부 citation trace용 `SectionDraft.citations`도 여기 정의된다.
 - `retrieval/pipeline.py`
   - retrieval orchestration의 중심이다.
   - sufficiency 판단, local/web merge, LLM decider 호출, refinement loop, retry-safe helper, artifacts 변환, retrieval summary 생성이 여기 있다.
+  - raw evidence count와 distinct coverage count를 함께 다루며, same-story repetition이 web sufficiency를 과대평가하지 않도록 보수적으로 계산한다.
+  - retry-safe helper는 failure note를 남기고 empty result로 내려와 graph 흐름을 유지한다.
   - local sufficiency 판단, retrieval decision, refinement round, web search hit 수를 콘솔에 기록한다.
 - `retrieval/retrieval_decider.py`
   - local-first 정책을 유지한 채 다음 retrieval action을 LLM structured output으로 결정한다.
   - web search 확장 여부와 refinement continuation 여부를 여기서 판단한다.
+  - 판단 입력에는 evidence/source count뿐 아니라 coverage count와 web search attempt 여부도 포함된다.
 - `retrieval/query_refiner.py`
   - retrieval gap을 바탕으로 추가 positive/risk query를 생성한다.
   - LLM 기반 refinement와 deterministic fallback을 함께 제공한다.
@@ -191,6 +203,7 @@
   - `WRITER_LLM_MODEL`을 사용한다.
 - `agents/validator.py`
   - 필수 헤딩, writer-chosen subsection 구조, SUMMARY 길이, reference 형식, placeholder 문구, retrieval gap 노출 여부를 검증한다.
+  - retrieval failure와 pure information gap을 분리해 warning issue로 올린다.
   - 내부 citation trace 존재 여부와 citation trace가 REFERENCE로 resolve되는지도 검증한다.
 - `utils/evidence_context.py`
   - 일반 evidence packet과 정량 근거 packet을 함께 만든다.
@@ -219,6 +232,9 @@
   - local RAG는 반드시 먼저 실행한다.
   - web search와 refinement continuation 여부는 retrieval layer의 LLM decider가 결정한다.
   - refinement는 retrieval layer 안에서만 수행하고, agent가 직접 ad-hoc query를 하드코딩하지 않는다.
+  - `used_web_search`는 “web 결과가 있었다”가 아니라 “web을 실제로 시도했다”는 의미로 유지한다.
+  - provider/runtime failure는 가능한 한 retrieval layer에서 note + warning + empty result로 흡수하고, validator가 최종적으로 gap과 failure를 함께 노출하도록 유지한다.
+  - same-story repetition이 sufficiency를 부풀리지 않도록 coverage 계산을 약화시키는 방향으로 되돌리지 않는다.
 - local provider 초기화는 공유한다.
   - Chroma collection과 embedding backend는 shared cache를 통해 재사용한다.
   - agent 단에서 provider를 매번 독자적으로 초기화하는 방향으로 되돌리지 않는다.
@@ -310,6 +326,8 @@
   - LangSmith는 연결 경고를 남길 수 있다.
   - query refiner는 deterministic fallback query로 내려가거나, 추가 query 없이 종료할 수 있다.
   - 이 경우에도 retrieval 로그는 `local RAG 실행 -> LLM retrieval decision -> web search 시도(실패 가능) -> refinement 여부 판단` 형태로 남는다.
+  - web search를 실제로 시도했지만 결과가 비거나 provider가 실패한 경우에도 `used_web_search=true`와 `retrieval_failures`가 state에 남는다.
+  - validator는 이를 단순 정보 부족과 별도의 retrieval failure warning으로 노출할 수 있다.
 - 첫 실행이나 캐시 미스 상태에서는:
   - embedding model download/load 때문에 startup이 느릴 수 있다.
   - prewarm이 활성화되어 있으면 이 비용은 retrieval 시작 전에 먼저 지불된다.
@@ -343,8 +361,11 @@
   - `./.venv/bin/python -m unittest discover -s tests`
 - 중요한 테스트 축:
   - retrieval sufficiency 및 종료 조건
+  - direct agent/graph import safety와 circular import 방지
   - local-first retrieval과 LLM 기반 web expansion decision
+  - web search attempt/failure tracking과 validator failure surfacing
   - gap 기반 query refinement loop
+  - same-story repetition을 보수적으로 처리하는 coverage 판단
   - vector store cache 및 병렬 초기화 안정성
   - supervisor post-retrieval branching 및 supervisor 단일 종료 구조
   - skeptic counter-evidence 보강

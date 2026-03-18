@@ -106,6 +106,7 @@ def _build_validation_issues(state: ReportState) -> list[ValidationIssue]:
             }
         )
 
+    issues.extend(_build_retrieval_failure_issues(state))
     issues.extend(_build_retrieval_gap_issues(state))
     issues.extend(_build_content_quality_issues(state))
     issues.extend(_build_citation_issues(state))
@@ -226,10 +227,53 @@ def _build_retrieval_gap_issues(state: ReportState) -> list[ValidationIssue]:
     return issues
 
 
+def _build_retrieval_failure_issues(state: ReportState) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+
+    if state["market"].get("retrieval_failures") and not state["market"]["retrieval_sufficient"]:
+        issues.append(
+            {
+                "issue_id": "market_retrieval_failure",
+                "section_id": "market_background",
+                "severity": "warning",
+                "message": "Market retrieval encountered execution failures before coverage became sufficient.",
+                "related_evidence_ids": state["market"]["evidence_ids"],
+                "suggested_action": _build_failure_action(state["market"]["retrieval_failures"]),
+                "retryable": False,
+            }
+        )
+
+    for company, section_id in (("LGES", "lges_strategy"), ("CATL", "catl_strategy")):
+        company_state = state["companies"][company]
+        if company_state.get("retrieval_failures") and not company_state["retrieval_sufficient"]:
+            issues.append(
+                {
+                    "issue_id": f"{company.lower()}_retrieval_failure",
+                    "section_id": section_id,
+                    "severity": "warning",
+                    "message": f"{company} retrieval encountered execution failures before coverage became sufficient.",
+                    "related_evidence_ids": company_state["evidence_ids"],
+                    "suggested_action": _build_failure_action(company_state["retrieval_failures"]),
+                    "retryable": False,
+                }
+            )
+
+    return issues
+
+
 def _build_gap_action(gaps: list[str]) -> str:
     if not gaps:
         return "Preserve the limitation in the report and avoid unsupported claims."
     return "Preserve the limitation in the report: " + "; ".join(gaps)
+
+
+def _build_failure_action(failures: list[str]) -> str:
+    if not failures:
+        return "Review the retrieval logs and LangSmith traces before trusting the remaining gaps."
+    return (
+        "Review the retrieval logs and LangSmith traces before trusting the remaining gaps: "
+        + "; ".join(failures)
+    )
 
 
 def _build_content_quality_issues(state: ReportState) -> list[ValidationIssue]:

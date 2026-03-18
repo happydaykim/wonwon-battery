@@ -63,6 +63,7 @@ class RetrievalAssessment:
     sufficient: bool
     gaps: list[str]
     evidence_count: int
+    coverage_count: int
     source_count: int
     positive_count: int
     risk_count: int
@@ -83,6 +84,19 @@ class RetrievalExecution:
     refinement_rounds: int
     decision_notes: list[str]
     refinement_notes: list[str]
+    failure_notes: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class FlatRetrievalCallResult:
+    results: list[NormalizedResult]
+    failure_note: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BucketedRetrievalCallResult:
+    results: MergedRetrievalResults
+    failure_note: str | None = None
 
 
 def is_retrieval_sufficient(
@@ -110,6 +124,13 @@ def evaluate_retrieval_results(
 ) -> RetrievalAssessment:
     """Evaluate retrieval coverage and return explicit insufficiency reasons."""
     evidence_count = len(results)
+    coverage_count = len(
+        {
+            _coverage_unit_key(result)
+            for result in results
+            if _coverage_unit_key(result)
+        }
+    )
     sources = {
         result.get("source_name") or result.get("source") or result.get("media")
         for result in results
@@ -127,9 +148,10 @@ def evaluate_retrieval_results(
             topic_tags.update(tag for tag in tags if isinstance(tag, str))
 
     gaps: list[str] = []
-    if evidence_count < min_evidence_count:
+    if coverage_count < min_evidence_count:
         gaps.append(
-            f"evidence_count: found {evidence_count} items but need at least {min_evidence_count}."
+            "evidence_count: found "
+            f"{coverage_count} distinct evidence unit(s) but need at least {min_evidence_count}."
         )
     if len(sources) < min_source_count:
         gaps.append(
@@ -160,6 +182,7 @@ def evaluate_retrieval_results(
         sufficient=not gaps,
         gaps=gaps,
         evidence_count=evidence_count,
+        coverage_count=coverage_count,
         source_count=len(sources),
         positive_count=positive_count,
         risk_count=risk_count,
@@ -233,7 +256,9 @@ def run_two_stage_retrieval(
     used_queries: set[str] = set()
     decision_notes: list[str] = []
     refinement_notes: list[str] = []
+    failure_notes: list[str] = []
     refinement_rounds = 0
+    web_search_attempted = False
     active_query_policy = _sanitize_query_policy(query_policy)
     round_index = 0
     local_assessment = _build_empty_assessment(company_scope)
@@ -249,12 +274,18 @@ def run_two_stage_retrieval(
             active_query_policy.get("risk_queries", []),
         )
 
-        round_local_results = _run_local_retrieval_with_retries(
+        local_call = _run_local_retrieval_with_retries(
             rag_retriever=rag_retriever,
             query_policy=active_query_policy,
             company_scope=company_scope,
             max_results_per_query=max_results_per_query,
             max_retries=document_search_max_retries,
+        )
+        round_local_results = local_call.results
+        _append_failure_note(
+            failure_notes,
+            decision_notes,
+            local_call.failure_note,
         )
         cumulative_local_results = _merge_flat_results(
             cumulative_local_results,
@@ -311,9 +342,7 @@ def run_two_stage_retrieval(
             observed_results=cumulative_local_results,
             current_query_policy=active_query_policy,
             query_history=query_history,
-            used_web_search=bool(
-                cumulative_web_results["positive_results"] or cumulative_web_results["risk_results"]
-            ),
+            used_web_search=web_search_attempted,
             refinement_rounds=refinement_rounds,
             refinement_budget=refinement_budget,
             settings=settings,
@@ -333,6 +362,7 @@ def run_two_stage_retrieval(
             local_decision.rationale,
         )
         if local_action == "search_web":
+            web_search_attempted = True
             if not cumulative_local_results:
                 logger.info(
                     "[%s] Local RAG returned 0 hits. Falling back to web search.",
@@ -345,12 +375,18 @@ def run_two_stage_retrieval(
                 )
             # Judge-suggested follow-up queries should count as history only if we actually execute them.
             _record_query_history(query_history, used_queries, active_query_policy)
-            round_web_results = _run_web_search_with_retries(
+            web_call = _run_web_search_with_retries(
                 web_search_client=web_search_client,
                 positive_queries=active_query_policy.get("positive_queries", []),
                 risk_queries=active_query_policy.get("risk_queries", []),
                 max_results_per_query=max_results_per_query,
                 max_retries=web_search_max_retries,
+            )
+            round_web_results = web_call.results
+            _append_failure_note(
+                failure_notes,
+                decision_notes,
+                web_call.failure_note,
             )
             logger.info(
                 "[%s] Web search hits: positive=%d, risk=%d",
@@ -471,15 +507,14 @@ def run_two_stage_retrieval(
     return RetrievalExecution(
         local_results=cumulative_local_results,
         merged_results=merged_results,
-        used_web_search=bool(
-            cumulative_web_results["positive_results"] or cumulative_web_results["risk_results"]
-        ),
+        used_web_search=web_search_attempted,
         local_assessment=local_assessment,
         final_assessment=final_assessment,
         query_history=query_history,
         refinement_rounds=refinement_rounds,
         decision_notes=decision_notes,
         refinement_notes=refinement_notes,
+        failure_notes=failure_notes,
     )
 
 
@@ -515,7 +550,9 @@ def run_skeptic_counter_retrieval(
     used_queries: set[str] = set()
     decision_notes: list[str] = []
     refinement_notes: list[str] = []
+    failure_notes: list[str] = []
     refinement_rounds = 0
+    web_search_attempted = False
     active_query_policy = {
         "positive_queries": [],
         "risk_queries": _sanitize_queries(risk_queries),
@@ -524,12 +561,19 @@ def run_skeptic_counter_retrieval(
 
     while True:
         _record_query_history(query_history, used_queries, active_query_policy)
-        round_results = _run_web_search_with_retries(
+        web_search_attempted = True
+        web_call = _run_web_search_with_retries(
             web_search_client=web_search_client,
             positive_queries=[],
             risk_queries=active_query_policy["risk_queries"],
             max_results_per_query=max_results_per_query,
             max_retries=web_search_max_retries,
+        )
+        round_results = web_call.results
+        _append_failure_note(
+            failure_notes,
+            decision_notes,
+            web_call.failure_note,
         )
         cumulative_web_results = _merge_bucketed_results(
             cumulative_web_results,
@@ -551,9 +595,7 @@ def run_skeptic_counter_retrieval(
             observed_results=cumulative_web_results["positive_results"] + cumulative_web_results["risk_results"],
             current_query_policy=active_query_policy,
             query_history=query_history,
-            used_web_search=bool(
-                cumulative_web_results["positive_results"] or cumulative_web_results["risk_results"]
-            ),
+            used_web_search=web_search_attempted,
             refinement_rounds=refinement_rounds,
             refinement_budget=refinement_budget,
             settings=settings,
@@ -612,15 +654,14 @@ def run_skeptic_counter_retrieval(
     return RetrievalExecution(
         local_results=[],
         merged_results=merged_results,
-        used_web_search=bool(
-            merged_results["positive_results"] or merged_results["risk_results"]
-        ),
+        used_web_search=web_search_attempted,
         local_assessment=_build_empty_assessment(company_scope),
         final_assessment=final_assessment,
         query_history=query_history,
         refinement_rounds=refinement_rounds,
         decision_notes=decision_notes,
         refinement_notes=refinement_notes,
+        failure_notes=failure_notes,
     )
 
 
@@ -706,6 +747,7 @@ def summarize_retrieval(
     final_assessment: RetrievalAssessment,
     query_history: list[str],
     refinement_rounds: int,
+    failure_notes: list[str] | None = None,
 ) -> str:
     """Build a structured content summary from the current retrieval stage."""
     positive_results = merged_results["positive_results"]
@@ -716,47 +758,49 @@ def summarize_retrieval(
 
     if not all_results:
         gap_text = "; ".join(final_assessment.gaps) if final_assessment.gaps else "근거 없음"
-        return "\n".join(
-            [
-                "[핵심 요약]",
-                f"- {agent_name.upper()} 관련 검색 결과가 수집되지 않아 실제 내용 요약을 만들 수 없다.",
-                "[검증 상태]",
-                f"- local_hits={len(local_results)}",
-                f"- web_search_used={used_web_search}",
-                f"- query_history={query_note}",
-                f"- refinement_rounds={refinement_rounds}",
-                f"- 남은 gap: {gap_text}",
-            ]
-        )
-
-    return "\n".join(
-        [
+        lines = [
             "[핵심 요약]",
-            _build_focus_line(all_results, company_scope=company_scope),
-            (
-                f"- 현재 수집본은 긍정 근거 {len(positive_results)}건, 리스크 근거 {len(risk_results)}건으로 구성되며, "
-                + (
-                    "local 결과 부족으로 web search까지 사용했다."
-                    if used_web_search
-                    else "local retrieval만으로 구성되었다."
-                )
-            ),
-            f"- 대표 출처는 {source_count}곳이며, 동일 출처 반복보다 서로 다른 근거 축이 우선 반영되었다.",
-            "[검색 루프]",
-            f"- 실행 질의: {query_note}",
-            f"- refinement_rounds={refinement_rounds}",
-            "[주요 긍정 근거]",
-            _format_result_digest(positive_results, limit=3),
-            "[주요 리스크 근거]",
-            _format_result_digest(risk_results, limit=3),
+            f"- {agent_name.upper()} 관련 검색 결과가 수집되지 않아 실제 내용 요약을 만들 수 없다.",
             "[검증 상태]",
-            (
-                "- 현재 수집본 기준 주요 coverage gap 없음."
-                if final_assessment.sufficient
-                else "- 남은 gap: " + "; ".join(final_assessment.gaps)
-            ),
+            f"- local_hits={len(local_results)}",
+            f"- web_search_used={used_web_search}",
+            f"- query_history={query_note}",
+            f"- refinement_rounds={refinement_rounds}",
+            f"- 남은 gap: {gap_text}",
         ]
-    )
+        if failure_notes:
+            lines.append("- retrieval_failures: " + "; ".join(failure_notes))
+        return "\n".join(lines)
+
+    lines = [
+        "[핵심 요약]",
+        _build_focus_line(all_results, company_scope=company_scope),
+        (
+            f"- 현재 수집본은 긍정 근거 {len(positive_results)}건, 리스크 근거 {len(risk_results)}건으로 구성되며, "
+            + (
+                "local 결과 부족으로 web search까지 사용했다."
+                if used_web_search
+                else "local retrieval만으로 구성되었다."
+            )
+        ),
+        f"- 대표 출처는 {source_count}곳이며, 동일 출처 반복보다 서로 다른 근거 축이 우선 반영되었다.",
+        "[검색 루프]",
+        f"- 실행 질의: {query_note}",
+        f"- refinement_rounds={refinement_rounds}",
+        "[주요 긍정 근거]",
+        _format_result_digest(positive_results, limit=3),
+        "[주요 리스크 근거]",
+        _format_result_digest(risk_results, limit=3),
+        "[검증 상태]",
+        (
+            "- 현재 수집본 기준 주요 coverage gap 없음."
+            if final_assessment.sufficient
+            else "- 남은 gap: " + "; ".join(final_assessment.gaps)
+        ),
+    ]
+    if failure_notes and not final_assessment.sufficient:
+        lines.append("- retrieval_failures: " + "; ".join(failure_notes))
+    return "\n".join(lines)
 
 
 def build_normalized_results_from_artifacts(
@@ -893,17 +937,23 @@ def _run_local_retrieval_with_retries(
     company_scope: Literal["MARKET", "LGES", "CATL"],
     max_results_per_query: int,
     max_retries: int,
-) -> list[NormalizedResult]:
+) -> FlatRetrievalCallResult:
     attempts = 0
     while True:
         try:
-            return _collect_local_results(
-                rag_retriever=rag_retriever,
-                query_policy=query_policy,
-                company_scope=company_scope,
-                max_results_per_query=max_results_per_query,
+            return FlatRetrievalCallResult(
+                results=_collect_local_results(
+                    rag_retriever=rag_retriever,
+                    query_policy=query_policy,
+                    company_scope=company_scope,
+                    max_results_per_query=max_results_per_query,
+                )
             )
         except Exception as exc:  # pragma: no cover - depends on runtime/provider failures
+            failure_note = (
+                "local_retrieval_failure: "
+                f"failed after {attempts + 1} attempt(s): {exc}"
+            )
             if attempts >= max_retries:
                 logger.warning(
                     "[%s] Local retrieval failed after %d attempt(s): %s",
@@ -911,7 +961,10 @@ def _run_local_retrieval_with_retries(
                     attempts + 1,
                     exc,
                 )
-                return []
+                return FlatRetrievalCallResult(
+                    results=[],
+                    failure_note=failure_note,
+                )
             attempts += 1
             logger.warning(
                 "[%s] Local retrieval failed. Retrying (%d/%d): %s",
@@ -1024,6 +1077,7 @@ def _assess_retrieval_results(
         sufficient=sufficient,
         gaps=gaps,
         evidence_count=base_assessment.evidence_count,
+        coverage_count=base_assessment.coverage_count,
         source_count=base_assessment.source_count,
         positive_count=base_assessment.positive_count,
         risk_count=base_assessment.risk_count,
@@ -1044,6 +1098,7 @@ def _format_rule_based_summary(assessment: RetrievalAssessment) -> str:
     return "\n".join(
         [
             f"- evidence_count: {assessment.evidence_count}",
+            f"- coverage_count: {assessment.coverage_count}",
             f"- source_count: {assessment.source_count}",
             f"- positive_count: {assessment.positive_count}",
             f"- risk_count: {assessment.risk_count}",
@@ -1120,26 +1175,35 @@ def _run_web_search_with_retries(
     risk_queries: list[str],
     max_results_per_query: int,
     max_retries: int,
-) -> MergedRetrievalResults:
+) -> BucketedRetrievalCallResult:
     attempts = 0
     while True:
         try:
-            return web_search_client.search(
-                positive_queries=positive_queries,
-                risk_queries=risk_queries,
-                max_results_per_query=max_results_per_query,
+            return BucketedRetrievalCallResult(
+                results=web_search_client.search(
+                    positive_queries=positive_queries,
+                    risk_queries=risk_queries,
+                    max_results_per_query=max_results_per_query,
+                )
             )
         except Exception as exc:  # pragma: no cover - depends on runtime/provider failures
+            failure_note = (
+                "web_search_failure: "
+                f"failed after {attempts + 1} attempt(s): {exc}"
+            )
             if attempts >= max_retries:
                 logger.warning(
                     "Web search failed after %d attempt(s): %s",
                     attempts + 1,
                     exc,
                 )
-                return {
-                    "positive_results": [],
-                    "risk_results": [],
-                }
+                return BucketedRetrievalCallResult(
+                    results={
+                        "positive_results": [],
+                        "risk_results": [],
+                    },
+                    failure_note=failure_note,
+                )
             attempts += 1
             logger.warning(
                 "Web search failed. Retrying (%d/%d): %s",
@@ -1160,6 +1224,18 @@ def _append_deduped_result(
 
     seen_keys.add(unique_key)
     bucket.append(result)
+
+
+def _append_failure_note(
+    failure_notes: list[str],
+    decision_notes: list[str],
+    failure_note: str | None,
+) -> None:
+    if not failure_note or failure_note in failure_notes:
+        return
+
+    failure_notes.append(failure_note)
+    decision_notes.append(f"runtime_failure:{failure_note}")
 
 
 def _result_unique_key(result: NormalizedResult) -> str:
@@ -1189,6 +1265,39 @@ def _result_unique_key(result: NormalizedResult) -> str:
         ]
     )
     return fallback
+
+
+def _coverage_unit_key(result: NormalizedResult) -> str:
+    if _is_local_result(result):
+        chunk_id = str(result.get("chunk_id") or "").strip().lower()
+        if chunk_id:
+            return f"local_chunk:{chunk_id}"
+
+        local_locator = "|".join(
+            [
+                str(result.get("doc_id") or "").strip().lower(),
+                str(result.get("page_or_chunk") or "").strip().lower(),
+            ]
+        ).strip("|")
+        if local_locator:
+            return f"local_unit:{local_locator}"
+
+        local_url = str(result.get("source_url") or result.get("link") or "").strip().lower()
+        if local_url:
+            return f"local_doc:{local_url}"
+
+    title_key = _normalize_story_title(result.get("title"))
+    published_key = str(result.get("published_at") or "").strip().lower()
+    if title_key:
+        if published_key:
+            return f"story:{title_key}|{published_key}"
+        return f"story:{title_key}"
+
+    return _result_unique_key(result)
+
+
+def _normalize_story_title(value: Any) -> str:
+    return re.sub(r"\W+", "", str(value or "").strip().lower())
 
 
 def _build_doc_id(result: NormalizedResult) -> str:

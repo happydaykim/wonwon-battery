@@ -936,6 +936,89 @@ class RetrievalPipelineTests(unittest.TestCase):
         self.assertTrue(any("리스크" in query or "risk" in query.lower() for query in execution.query_history))
         self.assertTrue(execution.final_assessment.sufficient)
 
+    def test_run_two_stage_retrieval_tracks_failed_web_search_attempts(self) -> None:
+        class _FailingWebSearch:
+            def search(
+                self,
+                *,
+                positive_queries: list[str],
+                risk_queries: list[str],
+                max_results_per_query: int = 3,
+            ) -> dict[str, list[dict[str, object]]]:
+                _ = (positive_queries, risk_queries, max_results_per_query)
+                raise RuntimeError("google news down")
+
+        with patch(
+            "retrieval.pipeline.decide_retrieval_action",
+            side_effect=[
+                SimpleNamespace(
+                    action="search_web",
+                    decision_mode="test",
+                    rationale="Need web coverage.",
+                ),
+                SimpleNamespace(
+                    action="stop",
+                    decision_mode="test",
+                    rationale="Stop after failed web attempt.",
+                ),
+            ],
+        ):
+            execution = run_two_stage_retrieval(
+                rag_retriever=_FakeRAGRetriever({}),
+                web_search_client=_FailingWebSearch(),
+                article_fetcher=None,
+                query_policy={
+                    "positive_queries": ["LG에너지솔루션 포트폴리오 다각화"],
+                    "risk_queries": ["LG에너지솔루션 수익성 리스크"],
+                },
+                company_scope="LGES",
+                max_results_per_query=2,
+                article_fetch_max_documents=0,
+                web_search_max_retries=0,
+                max_refinement_rounds=0,
+                max_new_queries_per_bucket=0,
+            )
+
+        self.assertTrue(execution.used_web_search)
+        self.assertTrue(any(note.startswith("web_search_failure:") for note in execution.failure_notes))
+        self.assertTrue(
+            any("runtime_failure:web_search_failure:" in note for note in execution.decision_notes)
+        )
+
+    def test_evaluate_retrieval_results_requires_distinct_story_coverage(self) -> None:
+        repeated_story = [
+            _result(
+                title="Same syndicated story",
+                source="OutletA",
+                stance="positive",
+                topic_tags=["strategy", "expansion"],
+                link="https://example.com/story-a",
+            ),
+            _result(
+                title="Same syndicated story",
+                source="OutletB",
+                stance="risk",
+                topic_tags=["risk"],
+                link="https://example.com/story-b",
+            ),
+            _result(
+                title="Same syndicated story",
+                source="OutletC",
+                stance="positive",
+                topic_tags=["strategy", "expansion"],
+                link="https://example.com/story-c",
+            ),
+        ]
+
+        assessment = evaluate_retrieval_results(repeated_story, company_scope="LGES")
+
+        self.assertFalse(assessment.sufficient)
+        self.assertEqual(3, assessment.evidence_count)
+        self.assertEqual(1, assessment.coverage_count)
+        self.assertTrue(
+            any(gap.startswith("evidence_count: found 1 distinct evidence unit") for gap in assessment.gaps)
+        )
+
     def test_local_artifacts_preserve_doc_and_chunk_level_context(self) -> None:
         merged_results = {
             "positive_results": [

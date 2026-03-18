@@ -109,6 +109,7 @@ def _build_default_market_state() -> TopicResearchState:
         "query_history": [],
         "refinement_rounds": 0,
         "decision_notes": [],
+        "retrieval_failures": [],
     }
 
 
@@ -129,6 +130,7 @@ def _build_default_company_state(
         "query_history": [],
         "refinement_rounds": 0,
         "decision_notes": [],
+        "retrieval_failures": [],
     }
 
 

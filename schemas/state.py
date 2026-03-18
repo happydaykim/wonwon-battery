@@ -75,6 +75,7 @@ class TopicResearchState(TypedDict):
     query_history: list[str]
     refinement_rounds: int
     decision_notes: list[str]
+    retrieval_failures: list[str]
 
 
 class CompanyResearchState(TypedDict):
@@ -91,6 +92,7 @@ class CompanyResearchState(TypedDict):
     query_history: list[str]
     refinement_rounds: int
     decision_notes: list[str]
+    retrieval_failures: list[str]
 
 
 class SentenceCitation(TypedDict):
