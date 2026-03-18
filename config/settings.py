@@ -33,6 +33,8 @@ class Settings:
     llm_model: str
     report_llm_provider: str
     report_llm_model: str
+    writer_llm_provider: str
+    writer_llm_model: str
     embedding_model: str
     vector_store: str
     chroma_persist_directory: Path
@@ -99,6 +101,14 @@ def load_settings() -> Settings:
             os.getenv("LLM_PROVIDER", "openai"),
         ),
         report_llm_model=os.getenv("REPORT_LLM_MODEL", "gpt-4o"),
+        writer_llm_provider=os.getenv(
+            "WRITER_LLM_PROVIDER",
+            os.getenv(
+                "REPORT_LLM_PROVIDER",
+                os.getenv("LLM_PROVIDER", "openai"),
+            ),
+        ),
+        writer_llm_model=os.getenv("WRITER_LLM_MODEL", "gpt-4o"),
         embedding_model=_normalize_embedding_model(
             os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
         ),

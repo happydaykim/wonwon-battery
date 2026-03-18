@@ -18,11 +18,6 @@ FINAL_REPORT_REQUIRED_HEADINGS = (
     "## 6. 종합 시사점",
     "## 7. REFERENCE",
 )
-MARKET_REQUIRED_SUBHEADINGS = (
-    "### 2.1 전기차 캐즘과 HEV 피벗",
-    "### 2.2 K-배터리 업계의 포트폴리오 다각화 배경",
-    "### 2.3 CATL의 원가/기술 전략 변화",
-)
 COMPARISON_REQUIRED_SUBHEADINGS = (
     "### 5.1 전략 방향 차이",
     "### 5.2 데이터 기반 비교표",
@@ -266,18 +261,16 @@ def _build_content_quality_issues(state: ReportState) -> list[ValidationIssue]:
         )
 
     market_content = state["section_drafts"]["market_background"]["content"]
-    missing_market_subheadings = [
-        heading for heading in MARKET_REQUIRED_SUBHEADINGS if heading not in market_content
-    ]
-    if missing_market_subheadings:
+    market_subheadings = _extract_numbered_subheadings(market_content, prefix="### 2.")
+    if len(market_subheadings) < 2:
         issues.append(
             {
                 "issue_id": "market_subheadings_missing",
                 "section_id": "market_background",
                 "severity": "error",
-                "message": "Market background is missing one or more required subsections.",
+                "message": "Market background should include multiple writer-chosen numbered subsections.",
                 "related_evidence_ids": state["section_drafts"]["market_background"]["evidence_ids"],
-                "suggested_action": "Include 2.1, 2.2, and 2.3 subheadings explicitly.",
+                "suggested_action": "Add at least two meaningful `### 2.x` subsections and expand the section with evidence-backed prose.",
                 "retryable": True,
             }
         )
@@ -404,3 +397,11 @@ def _build_citation_issues(state: ReportState) -> list[ValidationIssue]:
 def _is_reference_line_valid(line: str) -> bool:
     stripped = line.strip()
     return stripped.startswith("- ") and "*" in stripped and "http" in stripped
+
+
+def _extract_numbered_subheadings(content: str, *, prefix: str) -> list[str]:
+    return [
+        line.strip()
+        for line in content.splitlines()
+        if line.strip().startswith(prefix)
+    ]

@@ -18,13 +18,15 @@ class _FakeLLM:
 
 
 class ModelSelectionTests(unittest.TestCase):
-    def test_writer_chain_uses_report_llm_model(self) -> None:
+    def test_writer_chain_uses_writer_llm_model(self) -> None:
         settings = replace(
             load_settings(),
             llm_provider="openai",
             llm_model="planner-model",
             report_llm_provider="openai",
-            report_llm_model="gpt-4o",
+            report_llm_model="report-model",
+            writer_llm_provider="openai",
+            writer_llm_model="gpt-4o",
         )
 
         with patch("agents.writer.load_settings", return_value=settings), patch(
