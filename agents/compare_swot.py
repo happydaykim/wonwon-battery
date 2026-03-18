@@ -84,9 +84,14 @@ def compare_swot_node(state: ReportState) -> dict:
 
 def _create_compare_chain() -> Any:
     settings = load_settings()
+    logger.info(
+        "Compare/SWOT report generation model configured: provider=%s, model=%s",
+        settings.report_llm_provider,
+        settings.report_llm_model,
+    )
     compare_llm = init_chat_model(
-        settings.llm_model,
-        model_provider=settings.llm_provider,
+        settings.report_llm_model,
+        model_provider=settings.report_llm_provider,
         temperature=0,
     )
     return COMPARE_PROMPT | compare_llm.with_structured_output(CompareOutput)
