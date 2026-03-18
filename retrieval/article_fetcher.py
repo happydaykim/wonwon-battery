@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import base64
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 import html
 import json
 import re
@@ -39,6 +41,7 @@ class ArticleFetchResult:
     resolved_url: str | None
     publisher_name: str | None
     title: str | None
+    published_at: str | None
     excerpt: str | None
     full_text: str | None
 
@@ -102,6 +105,7 @@ class ArticleContentFetcher:
                     publisher_name=parsed.get("publisher_name")
                     or _infer_publisher_name_from_url(str(response.url)),
                     title=parsed.get("title"),
+                    published_at=parsed.get("published_at") or None,
                     excerpt=parsed.get("excerpt"),
                     full_text=parsed.get("full_text"),
                 )
@@ -134,6 +138,7 @@ def extract_article_content(html_text: str, *, char_limit: int) -> dict[str, str
         or _extract_meta_content(normalized_html, "name", "twitter:title")
         or _extract_title_tag(normalized_html)
     )
+    published_at = _extract_published_at(normalized_html)
     description = (
         _extract_meta_content(normalized_html, "property", "og:description")
         or _extract_meta_content(normalized_html, "name", "description")
@@ -152,6 +157,7 @@ def extract_article_content(html_text: str, *, char_limit: int) -> dict[str, str
     return {
         "publisher_name": publisher_name or "",
         "title": title or "",
+        "published_at": published_at or "",
         "excerpt": excerpt or "",
         "full_text": full_text or "",
     }
@@ -177,6 +183,27 @@ def _extract_article_body_from_json_ld(html_text: str) -> str | None:
     if not candidates:
         return None
     return max(candidates, key=len)
+
+
+def _extract_published_at(html_text: str) -> str | None:
+    meta_candidates = (
+        ("property", "article:published_time"),
+        ("property", "og:article:published_time"),
+        ("name", "article:published_time"),
+        ("name", "publish_date"),
+        ("name", "published_time"),
+        ("name", "pubdate"),
+        ("name", "date"),
+        ("itemprop", "datePublished"),
+        ("itemprop", "datecreated"),
+    )
+    for attr_name, attr_value in meta_candidates:
+        value = _extract_meta_content(html_text, attr_name, attr_value)
+        normalized = _normalize_published_at(value)
+        if normalized:
+            return normalized
+
+    return _extract_published_at_from_json_ld(html_text)
 
 
 def _extract_publisher_name(html_text: str) -> str | None:
@@ -209,6 +236,29 @@ def _extract_publisher_from_json_ld(html_text: str) -> str | None:
     return max(cleaned_candidates, key=len)
 
 
+def _extract_published_at_from_json_ld(html_text: str) -> str | None:
+    pattern = re.compile(
+        r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>",
+        re.IGNORECASE | re.DOTALL,
+    )
+    candidates: list[str] = []
+    for raw_json in pattern.findall(html_text):
+        cleaned = html.unescape(raw_json).strip()
+        if not cleaned:
+            continue
+        try:
+            payload = json.loads(cleaned)
+        except json.JSONDecodeError:
+            continue
+        candidates.extend(_collect_published_at_values(payload))
+
+    for candidate in candidates:
+        normalized = _normalize_published_at(candidate)
+        if normalized:
+            return normalized
+    return None
+
+
 def _collect_publisher_names(payload: Any) -> list[str]:
     if isinstance(payload, list):
         names: list[str] = []
@@ -236,6 +286,30 @@ def _collect_publisher_names(payload: Any) -> list[str]:
                         names.append(_clean_text(name))
 
         return names
+
+    return []
+
+
+def _collect_published_at_values(payload: Any) -> list[str]:
+    if isinstance(payload, list):
+        values: list[str] = []
+        for item in payload:
+            values.extend(_collect_published_at_values(item))
+        return values
+
+    if isinstance(payload, dict):
+        values: list[str] = []
+        graph = payload.get("@graph")
+        if isinstance(graph, list):
+            for item in graph:
+                values.extend(_collect_published_at_values(item))
+
+        for key in ("datePublished", "dateCreated", "uploadDate", "dateModified"):
+            raw_value = payload.get(key)
+            if isinstance(raw_value, str):
+                values.append(raw_value)
+
+        return values
 
     return []
 
@@ -349,6 +423,34 @@ def _extract_meta_content(html_text: str, attr_name: str, attr_value: str) -> st
     if not match:
         return None
     return _clean_text(match.group(1))
+
+
+def _normalize_published_at(value: str | None) -> str | None:
+    cleaned = _clean_text(value or "")
+    if not cleaned:
+        return None
+
+    date_match = re.search(r"(\d{4})[./-](\d{1,2})[./-](\d{1,2})", cleaned)
+    if date_match:
+        year, month, day = date_match.groups()
+        return f"{year}-{int(month):02d}-{int(day):02d}"
+
+    korean_date_match = re.search(r"(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일", cleaned)
+    if korean_date_match:
+        year, month, day = korean_date_match.groups()
+        return f"{year}-{int(month):02d}-{int(day):02d}"
+
+    try:
+        parsed = parsedate_to_datetime(cleaned)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        parsed = None
+    if parsed is not None:
+        return parsed.date().isoformat()
+
+    try:
+        return datetime.fromisoformat(cleaned.replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        return None
 
 
 def _extract_title_tag(html_text: str) -> str | None:

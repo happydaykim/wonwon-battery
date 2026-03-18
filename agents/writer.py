@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -11,7 +10,7 @@ from pydantic import BaseModel, Field
 from agents.base import build_agent_message, create_agent_blueprint
 from config.settings import load_settings
 from schemas.state import ReferenceEntry, ReportState, SectionDraft
-from utils.evidence_context import format_evidence_packet
+from utils.evidence_context import format_evidence_packet, select_representative_evidence_ids
 from utils.logging import get_logger
 
 
@@ -24,6 +23,12 @@ WRITER_BLUEPRINT = create_agent_blueprint(
 logger = get_logger(__name__)
 
 SUMMARY_MAX_CHARS = 900
+WRITER_MARKET_LIMIT = 10
+WRITER_COMPANY_LIMIT = 12
+WRITER_COUNTER_LIMIT = 5
+COMPARE_MARKET_LIMIT = 8
+COMPARE_COMPANY_LIMIT = 10
+COMPARE_COUNTER_LIMIT = 5
 
 SECTION_ORDER = (
     "summary",
@@ -66,18 +71,28 @@ WRITER_PROMPT = ChatPromptTemplate.from_messages(
 
 def writer_node(state: ReportState) -> dict:
     """Generate a human-readable Korean report draft from the collected evidence."""
-    references = _build_references(state)
+    section_evidence_map = _build_section_evidence_map(state)
+    references = _build_references(state, section_evidence_map=section_evidence_map)
 
     try:
         output = _create_writer_chain().invoke(
             {"report_context": _build_writer_context(state, references)}
         )
         note = "Writer stage completed via llm report synthesis."
-        section_drafts = _build_section_drafts_from_output(state, output, references)
+        section_drafts = _build_section_drafts_from_output(
+            state,
+            output,
+            references,
+            section_evidence_map,
+        )
     except Exception as exc:  # pragma: no cover - depends on runtime credentials/network
         logger.warning("Writer LLM unavailable. Falling back to deterministic report draft: %s", exc)
         note = "Writer stage completed via fallback report synthesis."
-        section_drafts = _build_fallback_section_drafts(state, references)
+        section_drafts = _build_fallback_section_drafts(
+            state,
+            references,
+            section_evidence_map,
+        )
 
     final_report = _build_final_report(section_drafts)
     remaining_plan = state["plan"][1:]
@@ -116,66 +131,51 @@ def _build_section_drafts_from_output(
     state: ReportState,
     output: WriterOutput,
     references: dict[str, ReferenceEntry],
+    section_evidence_map: dict[str, list[str]],
 ) -> dict[str, SectionDraft]:
     return {
         "summary": _build_section(
             state,
             "summary",
             output.summary.strip(),
-            list(state["evidence"].keys()),
+            section_evidence_map["summary"],
         ),
         "market_background": _build_section(
             state,
             "market_background",
             output.market_background.strip(),
-            state["market"]["evidence_ids"],
+            section_evidence_map["market_background"],
         ),
         "lges_strategy": _build_section(
             state,
             "lges_strategy",
             output.lges_strategy.strip(),
-            state["companies"]["LGES"]["evidence_ids"],
+            section_evidence_map["lges_strategy"],
         ),
         "catl_strategy": _build_section(
             state,
             "catl_strategy",
             output.catl_strategy.strip(),
-            state["companies"]["CATL"]["evidence_ids"],
+            section_evidence_map["catl_strategy"],
         ),
         "strategy_comparison": _build_section(
             state,
             "strategy_comparison",
             state["comparison_summary"]
             or _build_fallback_strategy_comparison(state),
-            _dedupe_ids(
-                [
-                    *state["companies"]["LGES"]["evidence_ids"],
-                    *state["companies"]["CATL"]["evidence_ids"],
-                ]
-            ),
+            section_evidence_map["strategy_comparison"],
         ),
         "swot": _build_section(
             state,
             "swot",
             _build_swot_content(state),
-            _dedupe_ids(
-                [
-                    *state["companies"]["LGES"]["evidence_ids"],
-                    *state["companies"]["CATL"]["evidence_ids"],
-                ]
-            ),
+            section_evidence_map["swot"],
         ),
         "implications": _build_section(
             state,
             "implications",
             output.implications.strip(),
-            _dedupe_ids(
-                [
-                    *state["market"]["evidence_ids"],
-                    *state["companies"]["LGES"]["evidence_ids"],
-                    *state["companies"]["CATL"]["evidence_ids"],
-                ]
-            ),
+            section_evidence_map["implications"],
         ),
         "references": _build_section(
             state,
@@ -189,65 +189,50 @@ def _build_section_drafts_from_output(
 def _build_fallback_section_drafts(
     state: ReportState,
     references: dict[str, ReferenceEntry],
+    section_evidence_map: dict[str, list[str]],
 ) -> dict[str, SectionDraft]:
     return {
         "summary": _build_section(
             state,
             "summary",
             _build_fallback_summary_content(state),
-            list(state["evidence"].keys()),
+            section_evidence_map["summary"],
         ),
         "market_background": _build_section(
             state,
             "market_background",
             _build_fallback_market_background_content(state),
-            state["market"]["evidence_ids"],
+            section_evidence_map["market_background"],
         ),
         "lges_strategy": _build_section(
             state,
             "lges_strategy",
             _build_fallback_company_section_content(state, "LGES"),
-            state["companies"]["LGES"]["evidence_ids"],
+            section_evidence_map["lges_strategy"],
         ),
         "catl_strategy": _build_section(
             state,
             "catl_strategy",
             _build_fallback_company_section_content(state, "CATL"),
-            state["companies"]["CATL"]["evidence_ids"],
+            section_evidence_map["catl_strategy"],
         ),
         "strategy_comparison": _build_section(
             state,
             "strategy_comparison",
             state["comparison_summary"] or _build_fallback_strategy_comparison(state),
-            _dedupe_ids(
-                [
-                    *state["companies"]["LGES"]["evidence_ids"],
-                    *state["companies"]["CATL"]["evidence_ids"],
-                ]
-            ),
+            section_evidence_map["strategy_comparison"],
         ),
         "swot": _build_section(
             state,
             "swot",
             _build_swot_content(state),
-            _dedupe_ids(
-                [
-                    *state["companies"]["LGES"]["evidence_ids"],
-                    *state["companies"]["CATL"]["evidence_ids"],
-                ]
-            ),
+            section_evidence_map["swot"],
         ),
         "implications": _build_section(
             state,
             "implications",
             _build_fallback_implications_content(state),
-            _dedupe_ids(
-                [
-                    *state["market"]["evidence_ids"],
-                    *state["companies"]["LGES"]["evidence_ids"],
-                    *state["companies"]["CATL"]["evidence_ids"],
-                ]
-            ),
+            section_evidence_map["implications"],
         ),
         "references": _build_section(
             state,
@@ -355,9 +340,133 @@ def _build_swot_content(state: ReportState) -> str:
     return "\n".join(lines)
 
 
-def _build_references(state: ReportState) -> dict[str, ReferenceEntry]:
+def _build_section_evidence_map(state: ReportState) -> dict[str, list[str]]:
+    market_writer = select_representative_evidence_ids(
+        state,
+        state["market"]["evidence_ids"],
+        limit=WRITER_MARKET_LIMIT,
+    )
+    lges_writer = select_representative_evidence_ids(
+        state,
+        state["companies"]["LGES"]["evidence_ids"],
+        limit=WRITER_COMPANY_LIMIT,
+    )
+    lges_counter_writer = select_representative_evidence_ids(
+        state,
+        state["companies"]["LGES"]["counter_evidence_ids"],
+        limit=WRITER_COUNTER_LIMIT,
+    )
+    catl_writer = select_representative_evidence_ids(
+        state,
+        state["companies"]["CATL"]["evidence_ids"],
+        limit=WRITER_COMPANY_LIMIT,
+    )
+    catl_counter_writer = select_representative_evidence_ids(
+        state,
+        state["companies"]["CATL"]["counter_evidence_ids"],
+        limit=WRITER_COUNTER_LIMIT,
+    )
+
+    market_compare = select_representative_evidence_ids(
+        state,
+        state["market"]["evidence_ids"],
+        limit=COMPARE_MARKET_LIMIT,
+    )
+    lges_compare = select_representative_evidence_ids(
+        state,
+        state["companies"]["LGES"]["evidence_ids"],
+        limit=COMPARE_COMPANY_LIMIT,
+    )
+    lges_counter_compare = select_representative_evidence_ids(
+        state,
+        state["companies"]["LGES"]["counter_evidence_ids"],
+        limit=COMPARE_COUNTER_LIMIT,
+    )
+    catl_compare = select_representative_evidence_ids(
+        state,
+        state["companies"]["CATL"]["evidence_ids"],
+        limit=COMPARE_COMPANY_LIMIT,
+    )
+    catl_counter_compare = select_representative_evidence_ids(
+        state,
+        state["companies"]["CATL"]["counter_evidence_ids"],
+        limit=COMPARE_COUNTER_LIMIT,
+    )
+
+    writer_global = _dedupe_ids(
+        [
+            *market_writer,
+            *lges_writer,
+            *lges_counter_writer,
+            *catl_writer,
+            *catl_counter_writer,
+        ]
+    )
+    comparison_global = _dedupe_ids(
+        [
+            *market_compare,
+            *lges_compare,
+            *lges_counter_compare,
+            *catl_compare,
+            *catl_counter_compare,
+        ]
+    )
+    summary_and_implications = _dedupe_ids([*writer_global, *comparison_global])
+
+    return {
+        "summary": summary_and_implications,
+        "market_background": market_writer,
+        "lges_strategy": _dedupe_ids([*lges_writer, *lges_counter_writer]),
+        "catl_strategy": _dedupe_ids([*catl_writer, *catl_counter_writer]),
+        "strategy_comparison": comparison_global,
+        "swot": comparison_global,
+        "implications": summary_and_implications,
+        "references": [],
+    }
+
+
+def _build_document_usage_map(
+    state: ReportState,
+    section_evidence_map: dict[str, list[str]] | None,
+) -> dict[str, list[str]]:
+    if section_evidence_map is None:
+        return {}
+
+    doc_usage: dict[str, list[str]] = {}
+    for section_id, evidence_ids in section_evidence_map.items():
+        if section_id == "references":
+            continue
+        for evidence_id in evidence_ids:
+            evidence_item = state["evidence"].get(evidence_id)
+            if evidence_item is None:
+                continue
+            doc_id = evidence_item["doc_id"]
+            if doc_id not in state["documents"]:
+                continue
+            doc_usage.setdefault(doc_id, []).append(section_id)
+
+    return {
+        doc_id: _dedupe_ids(section_ids)
+        for doc_id, section_ids in doc_usage.items()
+    }
+
+
+def _build_references(
+    state: ReportState,
+    *,
+    section_evidence_map: dict[str, list[str]] | None = None,
+) -> dict[str, ReferenceEntry]:
     references: dict[str, ReferenceEntry] = {}
-    for doc_id, document in sorted(state["documents"].items()):
+    doc_usage = _build_document_usage_map(state, section_evidence_map)
+    if section_evidence_map is not None:
+        candidate_doc_ids = sorted(doc_usage)
+    else:
+        candidate_doc_ids = sorted(state["documents"])
+
+    for doc_id in candidate_doc_ids:
+        document = state["documents"].get(doc_id)
+        if document is None:
+            continue
         if not _is_verifiable_reference(document):
             continue
         ref_id = f"ref_{doc_id}"
@@ -367,7 +476,7 @@ def _build_references(state: ReportState) -> dict[str, ReferenceEntry]:
             "doc_id": doc_id,
             "citation_text": _build_citation_text(document, reference_type=reference_type),
             "reference_type": reference_type,
-            "used_in_sections": _infer_used_sections(document["company_scope"]),
+            "used_in_sections": doc_usage.get(doc_id, _infer_used_sections(document["company_scope"])),
         }
     return references
 
@@ -401,7 +510,7 @@ def _build_citation_text(
         or _infer_source_name_from_url(source_url)
         or "Unknown source"
     )
-    published_at = document["published_at"] or datetime.now().strftime("%Y-%m-%d")
+    published_at = document["published_at"] or "날짜 미상"
     year = published_at[:4] if len(published_at) >= 4 else "YYYY"
     title = cleaned_title
 
