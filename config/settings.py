@@ -24,6 +24,8 @@ class Settings:
     langsmith_project: str
     llm_provider: str
     llm_model: str
+    report_llm_provider: str
+    report_llm_model: str
     embedding_model: str
     vector_store: str
     chroma_persist_directory: Path
@@ -61,7 +63,12 @@ def load_settings() -> Settings:
         langsmith_enabled=os.getenv("LANGSMITH_ENABLED", "true").lower() == "true",
         langsmith_project=os.getenv("LANGSMITH_PROJECT", "battery-strategy-agent"),
         llm_provider=os.getenv("LLM_PROVIDER", "openai"),
-        llm_model=os.getenv("LLM_MODEL", "TODO-model-name"),
+        llm_model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
+        report_llm_provider=os.getenv(
+            "REPORT_LLM_PROVIDER",
+            os.getenv("LLM_PROVIDER", "openai"),
+        ),
+        report_llm_model=os.getenv("REPORT_LLM_MODEL", "gpt-4o"),
         embedding_model=os.getenv("EMBEDDING_MODEL", "Qwen3-Embedding-0.6B"),
         vector_store=os.getenv("VECTOR_STORE", "chroma"),
         chroma_persist_directory=chroma_directory,
