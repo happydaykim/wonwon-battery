@@ -35,14 +35,6 @@ class LocalRAGRetriever:
         company_scope: str | None = None,
         top_k: int = 5,
     ) -> list[dict[str, Any]]:
-<<<<<<< Updated upstream
-        """Return no local hits until the real Chroma/Qwen3 RAG pipeline is implemented."""
-        _ = (query, company_scope, top_k)
-        # TODO: Wire Chroma, document ingestion, metadata filtering, and reranking.
-        # Current policy intentionally returns zero hits so every retrieval agent falls
-        # back to web search after the sufficiency check.
-        return []
-=======
         """Query the shared Chroma collection with the shared embedding backend."""
         collection = get_chroma_collection(
             chroma_dir=self.persist_directory,
@@ -76,4 +68,3 @@ class LocalRAGRetriever:
                 }
             )
         return matches
->>>>>>> Stashed changes
