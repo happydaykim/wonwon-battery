@@ -73,7 +73,7 @@ def load_settings() -> Settings:
             os.getenv("LLM_PROVIDER", "openai"),
         ),
         report_llm_model=os.getenv("REPORT_LLM_MODEL", "gpt-4o"),
-        embedding_model=os.getenv("EMBEDDING_MODEL", "Qwen3-Embedding-0.6B"),
+        embedding_model=os.getenv("EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B"),
         vector_store=os.getenv("VECTOR_STORE", "chroma"),
         chroma_persist_directory=chroma_directory,
         local_corpus_page_limit=int(os.getenv("LOCAL_CORPUS_PAGE_LIMIT", "100")),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha1
 from typing import Any, Literal
 
@@ -48,6 +48,9 @@ class RetrievalAssessment:
     positive_count: int
     risk_count: int
     topic_tags: list[str]
+    follow_up_positive_queries: list[str] = field(default_factory=list)
+    follow_up_risk_queries: list[str] = field(default_factory=list)
+    judge_summary: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +173,7 @@ def run_two_stage_retrieval(
     rag_retriever: Any,
     web_search_client: Any,
     article_fetcher: ArticleContentFetcher | None,
+    retrieval_judge: Any | None,
     query_policy: dict[str, list[str]],
     company_scope: Literal["MARKET", "LGES", "CATL"],
     max_results_per_query: int,
@@ -192,29 +196,44 @@ def run_two_stage_retrieval(
         max_results_per_query=max_results_per_query,
         max_retries=document_search_max_retries,
     )
-    local_assessment = evaluate_retrieval_results(
+    local_assessment = _assess_retrieval_results(
         local_results,
         company_scope=company_scope,
+        query_policy=query_policy,
+        stage="local",
+        retrieval_judge=retrieval_judge,
     )
     logger.info(
-        "[%s] Local RAG hits=%d, sufficient=%s",
+        "[%s] Local RAG hits=%d, sufficient=%s, gaps=%s",
         company_scope,
         len(local_results),
         local_assessment.sufficient,
+        local_assessment.gaps,
     )
     web_results: MergedRetrievalResults = {
         "positive_results": [],
         "risk_results": [],
     }
     if not local_assessment.sufficient:
+        fallback_query_policy = _merge_query_policy_with_follow_up_queries(
+            query_policy,
+            positive_queries=local_assessment.follow_up_positive_queries,
+            risk_queries=local_assessment.follow_up_risk_queries,
+        )
+        logger.info(
+            "[%s] Judge suggested fallback queries: positive=%s risk=%s",
+            company_scope,
+            fallback_query_policy["positive_queries"],
+            fallback_query_policy["risk_queries"],
+        )
         if not local_results:
             logger.info("[%s] Local RAG returned 0 hits. Falling back to web search.", company_scope)
         else:
             logger.info("[%s] Local RAG was insufficient. Falling back to web search.", company_scope)
         web_results = _run_web_search_with_retries(
             web_search_client=web_search_client,
-            positive_queries=query_policy.get("positive_queries", []),
-            risk_queries=query_policy.get("risk_queries", []),
+            positive_queries=fallback_query_policy.get("positive_queries", []),
+            risk_queries=fallback_query_policy.get("risk_queries", []),
             max_results_per_query=max_results_per_query,
             max_retries=web_search_max_retries,
         )
@@ -243,9 +262,12 @@ def run_two_stage_retrieval(
         len(merged_results["positive_results"]),
         len(merged_results["risk_results"]),
     )
-    final_assessment = evaluate_retrieval_results(
+    final_assessment = _assess_retrieval_results(
         merged_results["positive_results"] + merged_results["risk_results"],
         company_scope=company_scope,
+        query_policy=query_policy,
+        stage="final",
+        retrieval_judge=retrieval_judge,
     )
     return RetrievalExecution(
         local_results=local_results,
@@ -487,13 +509,132 @@ def _collect_local_results(
             )
             for result in results:
                 normalized_result = dict(result)
-                normalized_result.setdefault("query", query)
-                normalized_result.setdefault("stance", stance)
-                if "topic_tags" not in normalized_result:
-                    normalized_result["topic_tags"] = infer_topic_tags(query, stance=stance)
+                metadata = normalized_result.get("metadata")
+                if isinstance(metadata, dict):
+                    for key, value in metadata.items():
+                        normalized_result.setdefault(key, value)
+
+                normalized_result["query"] = normalized_result.get("query") or query
+                normalized_result["stance"] = normalized_result.get("stance") or stance
+                normalized_result["source"] = (
+                    normalized_result.get("source")
+                    or normalized_result.get("source_name")
+                )
+                normalized_result["link"] = (
+                    normalized_result.get("link")
+                    or normalized_result.get("source_url")
+                )
+                normalized_result["title"] = (
+                    normalized_result.get("title")
+                    or normalized_result.get("section_title")
+                    or "Untitled local result"
+                )
+                if not normalized_result.get("topic_tags"):
+                    normalized_result["topic_tags"] = infer_topic_tags(
+                        query,
+                        stance=normalized_result["stance"],
+                    )
                 local_results.append(normalized_result)
 
     return local_results
+
+
+def _assess_retrieval_results(
+    results: list[NormalizedResult],
+    *,
+    company_scope: Literal["MARKET", "LGES", "CATL"],
+    query_policy: dict[str, list[str]],
+    stage: Literal["local", "final"],
+    retrieval_judge: Any | None,
+) -> RetrievalAssessment:
+    base_assessment = evaluate_retrieval_results(
+        results,
+        company_scope=company_scope,
+    )
+    if retrieval_judge is None:
+        return base_assessment
+
+    try:
+        judge_decision = retrieval_judge.judge(
+            results=results,
+            company_scope=company_scope,
+            query_policy=query_policy,
+            stage=stage,
+            rule_based_summary=_format_rule_based_summary(base_assessment),
+        )
+    except Exception as exc:  # pragma: no cover - depends on runtime credentials/network
+        logger.warning(
+            "[%s] Retrieval judge failed at %s stage. Falling back to rule-based assessment: %s",
+            company_scope,
+            stage,
+            exc,
+        )
+        return base_assessment
+
+    sufficient = bool(results) and judge_decision.sufficient
+    gaps = judge_decision.gaps or ([] if sufficient else base_assessment.gaps)
+    return RetrievalAssessment(
+        sufficient=sufficient,
+        gaps=gaps,
+        evidence_count=base_assessment.evidence_count,
+        source_count=base_assessment.source_count,
+        positive_count=base_assessment.positive_count,
+        risk_count=base_assessment.risk_count,
+        topic_tags=base_assessment.topic_tags,
+        follow_up_positive_queries=(
+            judge_decision.positive_queries if stage == "local" and not sufficient else []
+        ),
+        follow_up_risk_queries=(
+            judge_decision.risk_queries if stage == "local" and not sufficient else []
+        ),
+        judge_summary=judge_decision.reasoning_summary,
+    )
+
+
+def _format_rule_based_summary(assessment: RetrievalAssessment) -> str:
+    gaps = "; ".join(assessment.gaps) if assessment.gaps else "없음"
+    topic_tags = ", ".join(assessment.topic_tags) if assessment.topic_tags else "없음"
+    return "\n".join(
+        [
+            f"- evidence_count: {assessment.evidence_count}",
+            f"- source_count: {assessment.source_count}",
+            f"- positive_count: {assessment.positive_count}",
+            f"- risk_count: {assessment.risk_count}",
+            f"- topic_tags: {topic_tags}",
+            f"- gaps: {gaps}",
+        ]
+    )
+
+
+def _merge_query_policy_with_follow_up_queries(
+    query_policy: dict[str, list[str]],
+    *,
+    positive_queries: list[str],
+    risk_queries: list[str],
+) -> dict[str, list[str]]:
+    return {
+        "positive_queries": _dedupe_queries(
+            [*query_policy.get("positive_queries", []), *positive_queries]
+        ),
+        "risk_queries": _dedupe_queries(
+            [*query_policy.get("risk_queries", []), *risk_queries]
+        ),
+    }
+
+
+def _dedupe_queries(queries: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for query in queries:
+        normalized = " ".join(str(query).split()).strip()
+        if not normalized:
+            continue
+        lowered = normalized.lower()
+        if lowered in seen:
+            continue
+        deduped.append(normalized)
+        seen.add(lowered)
+    return deduped
 
 
 def _run_web_search_with_retries(
@@ -596,6 +737,8 @@ def enrich_results_with_article_content(
             result["source_name"] = fetch_result.publisher_name
         if fetch_result.title:
             result["title"] = fetch_result.title
+        if fetch_result.published_at:
+            result["published_at"] = fetch_result.published_at
         if fetch_result.excerpt:
             result["article_excerpt"] = fetch_result.excerpt
             result["snippet"] = fetch_result.excerpt
