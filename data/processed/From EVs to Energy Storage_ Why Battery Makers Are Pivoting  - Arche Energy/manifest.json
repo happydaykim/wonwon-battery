@@ -1,0 +1,10 @@
+{
+  "doc_id": "From EVs to Energy Storage_ Why Battery Makers Are Pivoting  - Arche Energy",
+  "pdf_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/pdfs/From EVs to Energy Storage_ Why Battery Makers Are Pivoting  - Arche Energy.pdf",
+  "page_count": 4,
+  "chunk_count": 14,
+  "pages_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/From EVs to Energy Storage_ Why Battery Makers Are Pivoting  - Arche Energy/pages.jsonl",
+  "chunks_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/processed/From EVs to Energy Storage_ Why Battery Makers Are Pivoting  - Arche Energy/chunks.jsonl",
+  "collection_name": "battery_document",
+  "chroma_path": "/Users/hyobin/skala/workspace/skala-gen-ai-project/wonwon-battery/data/chroma"
+}

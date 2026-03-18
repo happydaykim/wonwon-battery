@@ -1,0 +1,12 @@
+{
+  "doc_id": "고유 문서 ID",
+  "title": "문서 제목",
+  "author": "저자명 또는 null",
+  "source_name": "출처명",
+  "source_url": "원문 URL 또는 null",
+  "published_at": "발행일 또는 null",
+  "doc_type": "문서 유형",
+  "company_scope": "MARKET | LGES | CATL | BOTH",
+  "stance": "neutral | positive | risk",
+  "language": "en | ko | zh"
+}
