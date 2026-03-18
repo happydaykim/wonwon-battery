@@ -22,14 +22,14 @@ SECTION_ORDER = (
 )
 
 SECTION_HEADINGS = {
-    "summary": "1. SUMMARY",
-    "market_background": "2. 시장 배경",
-    "lges_strategy": "3. LG에너지솔루션의 포트폴리오 다각화 전략과 핵심 경쟁력",
-    "catl_strategy": "4. CATL의 포트폴리오 다각화 전략과 핵심 경쟁력",
-    "strategy_comparison": "5. 핵심 전략 비교 분석",
-    "swot": "5.3 SWOT 분석",
-    "implications": "6. 종합 시사점",
-    "references": "7. REFERENCE",
+    "summary": "I. EXECUTIVE SUMMARY",
+    "market_background": "II. 시장 배경",
+    "lges_strategy": "III. LG에너지솔루션의 포트폴리오 다각화 전략과 핵심 경쟁력",
+    "catl_strategy": "IV. CATL의 포트폴리오 다각화 전략과 핵심 경쟁력",
+    "strategy_comparison": "V. 핵심 전략 비교 분석",
+    "swot": "V.III SWOT 분석",
+    "implications": "VI. 종합 시사점",
+    "references": "VII. REFERENCE",
 }
 
 URL_PATTERN = re.compile(r"https?://[^\s<]+")
@@ -105,7 +105,6 @@ def build_report_html(
 ) -> str:
     created_at = generated_at or datetime.now()
     report_title = "배터리 시장 전략 분석 보고서"
-    toc_html = _render_table_of_contents()
     sections_html = "\n".join(_render_section(result, section_id) for section_id in SECTION_ORDER)
     created_label = created_at.strftime("%Y-%m-%d")
     body_class = "pdf-export" if output_mode == "pdf" else "screen-export"
@@ -128,7 +127,6 @@ def build_report_html(
             f"<h1>{escape(report_title)}</h1>",
             f'<p class="report-date">작성 일시 {escape(created_label)}</p>',
             "</header>",
-            toc_html,
             sections_html,
             "</main>",
             "</body>",

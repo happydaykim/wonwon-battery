@@ -9,18 +9,18 @@ VALIDATOR_AGENT_NAME = "validator_agent"
 SUMMARY_MAX_CHARS = 900
 SUMMARY_MIN_CHARS = 150
 FINAL_REPORT_REQUIRED_HEADINGS = (
-    "## 1. SUMMARY",
-    "## 2. 시장 배경",
-    "## 3. LG에너지솔루션의 포트폴리오 다각화 전략과 핵심 경쟁력",
-    "## 4. CATL의 포트폴리오 다각화 전략과 핵심 경쟁력",
-    "## 5. 핵심 전략 비교 분석",
-    "## 5.3 SWOT 분석",
-    "## 6. 종합 시사점",
-    "## 7. REFERENCE",
+    "## I. EXECUTIVE SUMMARY",
+    "## II. 시장 배경",
+    "## III. LG에너지솔루션의 포트폴리오 다각화 전략과 핵심 경쟁력",
+    "## IV. CATL의 포트폴리오 다각화 전략과 핵심 경쟁력",
+    "## V. 핵심 전략 비교 분석",
+    "## V.III SWOT 분석",
+    "## VI. 종합 시사점",
+    "## VII. REFERENCE",
 )
 COMPARISON_REQUIRED_SUBHEADINGS = (
-    "### 5.1 전략 방향 차이",
-    "### 5.2 데이터 기반 비교표",
+    "### V.I 전략 방향 차이",
+    "### V.II 데이터 기반 비교표",
 )
 PLACEHOLDER_PHRASES = (
     "TODO",
@@ -241,7 +241,7 @@ def _build_content_quality_issues(state: ReportState) -> list[ValidationIssue]:
                 "issue_id": "summary_too_long",
                 "section_id": "summary",
                 "severity": "error",
-                "message": "SUMMARY exceeds the configured maximum length.",
+                "message": "EXECUTIVE SUMMARY exceeds the configured maximum length.",
                 "related_evidence_ids": state["section_drafts"]["summary"]["evidence_ids"],
                 "suggested_action": "Condense the executive summary to half-page length.",
                 "retryable": True,
@@ -253,7 +253,7 @@ def _build_content_quality_issues(state: ReportState) -> list[ValidationIssue]:
                 "issue_id": "summary_too_short",
                 "section_id": "summary",
                 "severity": "warning",
-                "message": "SUMMARY is too short to function as an executive summary.",
+                "message": "EXECUTIVE SUMMARY is too short to function as an executive summary.",
                 "related_evidence_ids": state["section_drafts"]["summary"]["evidence_ids"],
                 "suggested_action": "Expand the summary with key findings and caveats.",
                 "retryable": True,
@@ -261,16 +261,16 @@ def _build_content_quality_issues(state: ReportState) -> list[ValidationIssue]:
         )
 
     market_content = state["section_drafts"]["market_background"]["content"]
-    market_subheadings = _extract_numbered_subheadings(market_content, prefix="### 2.")
+    market_subheadings = _extract_numbered_subheadings(market_content, prefix="### II.")
     if len(market_subheadings) < 2:
         issues.append(
             {
                 "issue_id": "market_subheadings_missing",
                 "section_id": "market_background",
                 "severity": "error",
-                "message": "Market background should include multiple writer-chosen numbered subsections.",
+                "message": "Market background should include multiple writer-chosen Roman-numbered subsections.",
                 "related_evidence_ids": state["section_drafts"]["market_background"]["evidence_ids"],
-                "suggested_action": "Add at least two meaningful `### 2.x` subsections and expand the section with evidence-backed prose.",
+                "suggested_action": "Add at least two meaningful `### II.I` style subsections and expand the section with evidence-backed prose.",
                 "retryable": True,
             }
         )
@@ -284,7 +284,7 @@ def _build_content_quality_issues(state: ReportState) -> list[ValidationIssue]:
                 "severity": "error",
                 "message": "Strategy comparison is missing required subsection headings.",
                 "related_evidence_ids": state["section_drafts"]["strategy_comparison"]["evidence_ids"],
-                "suggested_action": "Include 5.1 strategy difference and 5.2 data table subsections.",
+                "suggested_action": "Include V.I strategy difference and V.II data table subsections.",
                 "retryable": True,
             }
         )
@@ -299,9 +299,9 @@ def _build_content_quality_issues(state: ReportState) -> list[ValidationIssue]:
                     "issue_id": "final_report_headings_missing",
                     "section_id": "summary",
                     "severity": "error",
-                    "message": "final_report is missing one or more required numbered headings.",
+                    "message": "final_report is missing one or more required Roman-numbered headings.",
                     "related_evidence_ids": [],
-                    "suggested_action": "Rebuild the final report with the exact required top-level headings.",
+                    "suggested_action": "Rebuild the final report with the exact required top-level Roman headings.",
                     "retryable": True,
                 }
             )

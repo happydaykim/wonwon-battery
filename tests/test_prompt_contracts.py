@@ -42,7 +42,8 @@ class PromptContractTests(unittest.TestCase):
     def test_writer_prompt_contains_required_report_constraints(self) -> None:
         prompt_text = load_prompt("writer.md")
         self.assertIn("900자", prompt_text)
-        self.assertIn("### 2.x", prompt_text)
+        self.assertIn("EXECUTIVE SUMMARY", prompt_text)
+        self.assertIn("### II.I", prompt_text)
         self.assertIn("정량", prompt_text)
         self.assertIn("정보 부족/추가 검증 필요", prompt_text)
 

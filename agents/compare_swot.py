@@ -108,45 +108,46 @@ def _build_comparison_context(state: ReportState) -> str:
             "규칙:",
             "- 전략 방향 차이는 한국어 문단 2~4개 분량으로 작성한다.",
             "- 데이터 기반 비교표는 Markdown 표로 작성한다.",
-            "- SWOT 각 항목은 1~3개로 제한한다.",
+            "- SWOT 각 항목은 근거가 충분하면 2~4개까지 제시할 수 있고, 근거가 부족하면 억지로 채우지 않는다.",
             "- 근거가 부족하면 '정보 부족/추가 검증 필요'를 명시한다.",
+            "- 정량 수치, 기준 시점, 비교 조건이 판단에 중요하면 요약 과정에서 생략하지 않는다.",
             "[시장 배경 요약]",
             state["market"]["synthesized_summary"] or "정보 부족",
             "[시장 배경 근거]",
-            format_evidence_packet(state, state["market"]["evidence_ids"], limit=8),
+            format_evidence_packet(state, state["market"]["evidence_ids"], limit=10),
             "[시장 배경 정량 근거]",
-            format_quantitative_evidence_packet(state, state["market"]["evidence_ids"], limit=5),
+            format_quantitative_evidence_packet(state, state["market"]["evidence_ids"], limit=7),
             "[LGES 요약]",
             state["companies"]["LGES"]["synthesized_summary"] or "정보 부족",
             "[LGES 근거]",
-            format_evidence_packet(state, state["companies"]["LGES"]["evidence_ids"], limit=10),
+            format_evidence_packet(state, state["companies"]["LGES"]["evidence_ids"], limit=12),
             "[LGES 정량 근거]",
             format_quantitative_evidence_packet(
                 state,
                 state["companies"]["LGES"]["evidence_ids"],
-                limit=6,
+                limit=8,
             ),
             "[LGES counter evidence]",
             format_evidence_packet(
                 state,
                 state["companies"]["LGES"]["counter_evidence_ids"],
-                limit=5,
+                limit=6,
             ),
             "[CATL 요약]",
             state["companies"]["CATL"]["synthesized_summary"] or "정보 부족",
             "[CATL 근거]",
-            format_evidence_packet(state, state["companies"]["CATL"]["evidence_ids"], limit=10),
+            format_evidence_packet(state, state["companies"]["CATL"]["evidence_ids"], limit=12),
             "[CATL 정량 근거]",
             format_quantitative_evidence_packet(
                 state,
                 state["companies"]["CATL"]["evidence_ids"],
-                limit=6,
+                limit=8,
             ),
             "[CATL counter evidence]",
             format_evidence_packet(
                 state,
                 state["companies"]["CATL"]["counter_evidence_ids"],
-                limit=5,
+                limit=6,
             ),
             "[검증 gap]",
             "\n".join(
@@ -163,9 +164,9 @@ def _build_comparison_context(state: ReportState) -> str:
 def _render_comparison_summary(output: CompareOutput) -> str:
     return "\n\n".join(
         [
-            "### 5.1 전략 방향 차이",
+            "### V.I 전략 방향 차이",
             output.strategy_direction_diff.strip(),
-            "### 5.2 데이터 기반 비교표",
+            "### V.II 데이터 기반 비교표",
             output.data_table_markdown.strip(),
         ]
     )
@@ -174,7 +175,7 @@ def _render_comparison_summary(output: CompareOutput) -> str:
 def _build_fallback_comparison_summary(state: ReportState) -> str:
     market_state = state["market"]
     lines = [
-        "### 5.1 전략 방향 차이",
+        "### V.I 전략 방향 차이",
         (
             f"LGES는 현재 {len(state['companies']['LGES']['evidence_ids'])}건의 근거가 수집되었고, "
             f"CATL은 {len(state['companies']['CATL']['evidence_ids'])}건의 근거가 수집되었다. "
@@ -188,7 +189,7 @@ def _build_fallback_comparison_summary(state: ReportState) -> str:
                 else "비교를 진행할 최소 배경 정보는 확보되었다."
             )
         ),
-        "### 5.2 데이터 기반 비교표",
+        "### V.II 데이터 기반 비교표",
         "| 회사 | 확보 근거 수 | 반대 근거 수 | 남은 gap |",
         "| --- | ---: | ---: | --- |",
         (

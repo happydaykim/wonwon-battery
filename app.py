@@ -33,7 +33,7 @@ def _build_default_section_drafts() -> dict[str, SectionDraft]:
     return {
         "summary": {
             "section_id": "summary",
-            "title": "SUMMARY",
+            "title": "EXECUTIVE SUMMARY",
             "content": "",
             "evidence_ids": [],
             "citations": [],

@@ -69,11 +69,11 @@ def _build_valid_state() -> dict:
     )
     state["section_drafts"]["market_background"]["content"] = "\n".join(
         [
-            "### 2.1 전기차 캐즘과 HEV 피벗",
+            "### II.I 전기차 캐즘과 HEV 피벗",
             "시장 서술",
-            "### 2.2 K-배터리 업계의 포트폴리오 다각화 배경",
+            "### II.II K-배터리 업계의 포트폴리오 다각화 배경",
             "배경 서술",
-            "### 2.3 CATL의 원가/기술 전략 변화",
+            "### II.III CATL의 원가/기술 전략 변화",
             "CATL 서술",
         ]
     )
@@ -81,9 +81,9 @@ def _build_valid_state() -> dict:
     state["section_drafts"]["catl_strategy"]["content"] = "CATL 본문"
     state["section_drafts"]["strategy_comparison"]["content"] = "\n".join(
         [
-            "### 5.1 전략 방향 차이",
+            "### V.I 전략 방향 차이",
             "비교 본문",
-            "### 5.2 데이터 기반 비교표",
+            "### V.II 데이터 기반 비교표",
             "| 회사 | 전략 |",
             "| --- | --- |",
             "| LGES | 확장 |",
@@ -92,7 +92,7 @@ def _build_valid_state() -> dict:
     )
     state["section_drafts"]["swot"]["content"] = "\n".join(
         [
-            "### 5.3 SWOT 분석",
+            "### V.III SWOT 분석",
             "#### LGES",
             "- Strengths: 강점",
             "#### CATL",
@@ -107,21 +107,21 @@ def _build_valid_state() -> dict:
     state["final_report"] = "\n".join(
         [
             "# 배터리 시장 전략 분석 보고서",
-            "## 1. SUMMARY",
+            "## I. EXECUTIVE SUMMARY",
             state["section_drafts"]["summary"]["content"],
-            "## 2. 시장 배경",
+            "## II. 시장 배경",
             state["section_drafts"]["market_background"]["content"],
-            "## 3. LG에너지솔루션의 포트폴리오 다각화 전략과 핵심 경쟁력",
+            "## III. LG에너지솔루션의 포트폴리오 다각화 전략과 핵심 경쟁력",
             state["section_drafts"]["lges_strategy"]["content"],
-            "## 4. CATL의 포트폴리오 다각화 전략과 핵심 경쟁력",
+            "## IV. CATL의 포트폴리오 다각화 전략과 핵심 경쟁력",
             state["section_drafts"]["catl_strategy"]["content"],
-            "## 5. 핵심 전략 비교 분석",
+            "## V. 핵심 전략 비교 분석",
             state["section_drafts"]["strategy_comparison"]["content"],
-            "## 5.3 SWOT 분석",
+            "## V.III SWOT 분석",
             state["section_drafts"]["swot"]["content"],
-            "## 6. 종합 시사점",
+            "## VI. 종합 시사점",
             state["section_drafts"]["implications"]["content"],
-            "## 7. REFERENCE",
+            "## VII. REFERENCE",
             state["section_drafts"]["references"]["content"],
         ]
     )

@@ -14,7 +14,7 @@ from config.settings import load_settings
 class AppOutputTests(unittest.TestCase):
     def test_write_final_report_artifacts_persist_html_and_pdf_files(self) -> None:
         state = build_initial_state("전략 비교 분석 보고서 테스트")
-        state["final_report"] = "## 1. SUMMARY\n보고서 본문"
+        state["final_report"] = "## I. EXECUTIVE SUMMARY\n보고서 본문"
         for section_id in state["section_drafts"]:
             state["section_drafts"][section_id]["status"] = "drafted"
 
@@ -23,9 +23,9 @@ class AppOutputTests(unittest.TestCase):
         )
         state["section_drafts"]["market_background"]["content"] = "\n\n".join(
             [
-                "### 2.1 전기차 캐즘과 HEV 피벗\nEV 수요 둔화와 HEV 수요 확대가 병행되고 있다.",
-                "### 2.2 K-배터리 업계의 포트폴리오 다각화 배경\n국내 업체들은 EV 외 수요처 확장을 추진한다.",
-                "### 2.3 CATL의 원가/기술 전략 변화\nCATL은 원가와 기술 우위를 기반으로 확장 전략을 전개한다.",
+                "### II.I 전기차 캐즘과 HEV 피벗\nEV 수요 둔화와 HEV 수요 확대가 병행되고 있다.",
+                "### II.II K-배터리 업계의 포트폴리오 다각화 배경\n국내 업체들은 EV 외 수요처 확장을 추진한다.",
+                "### II.III CATL의 원가/기술 전략 변화\nCATL은 원가와 기술 우위를 기반으로 확장 전략을 전개한다.",
             ]
         )
         state["section_drafts"]["lges_strategy"]["content"] = (
@@ -36,10 +36,10 @@ class AppOutputTests(unittest.TestCase):
         )
         state["section_drafts"]["strategy_comparison"]["content"] = "\n\n".join(
             [
-                "### 5.1 전략 방향 차이\nLGES는 지역 확장과 응용처 다변화가 두드러지고, CATL은 원가 및 기술 축이 상대적으로 강하다.",
+                "### V.I 전략 방향 차이\nLGES는 지역 확장과 응용처 다변화가 두드러지고, CATL은 원가 및 기술 축이 상대적으로 강하다.",
                 "\n".join(
                     [
-                        "### 5.2 데이터 기반 비교표",
+                        "### V.II 데이터 기반 비교표",
                         "| 회사 | 전략 축 | 확보 근거 수 |",
                         "| --- | --- | ---: |",
                         "| LGES | 북미/ESS | 3 |",
@@ -101,12 +101,13 @@ class AppOutputTests(unittest.TestCase):
             self.assertIn("Table 5-1. 데이터 기반 비교표", html)
             self.assertIn("Table 5-2. LGES SWOT Matrix", html)
             self.assertIn('class="swot-matrix"', html)
-            self.assertIn('class="toc-list"', html)
+            self.assertNotIn("Contents", html)
             self.assertNotIn("Strategic Analysis Report", html)
             self.assertNotIn("전략 비교 분석 보고서 테스트", html)
             self.assertNotIn("문서 형식", html)
             self.assertNotIn("작성 목적", html)
             self.assertNotIn("1. 1. SUMMARY", html)
+            self.assertIn("I. EXECUTIVE SUMMARY", html)
 
             pdf = pymupdf.open(str(artifacts.pdf_path))
             pdf_text = "\n".join(page.get_text() for page in pdf)

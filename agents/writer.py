@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -28,12 +29,12 @@ WRITER_BLUEPRINT = create_agent_blueprint(
 logger = get_logger(__name__)
 
 SUMMARY_MAX_CHARS = 900
-WRITER_MARKET_LIMIT = 10
-WRITER_COMPANY_LIMIT = 12
-WRITER_COUNTER_LIMIT = 5
-COMPARE_MARKET_LIMIT = 8
-COMPARE_COMPANY_LIMIT = 10
-COMPARE_COUNTER_LIMIT = 5
+WRITER_MARKET_LIMIT = 12
+WRITER_COMPANY_LIMIT = 16
+WRITER_COUNTER_LIMIT = 6
+COMPARE_MARKET_LIMIT = 10
+COMPARE_COMPANY_LIMIT = 14
+COMPARE_COUNTER_LIMIT = 6
 
 SECTION_ORDER = (
     "summary",
@@ -47,15 +48,17 @@ SECTION_ORDER = (
 )
 
 REPORT_HEADING_BY_SECTION = {
-    "summary": "1. SUMMARY",
-    "market_background": "2. 시장 배경",
-    "lges_strategy": "3. LG에너지솔루션의 포트폴리오 다각화 전략과 핵심 경쟁력",
-    "catl_strategy": "4. CATL의 포트폴리오 다각화 전략과 핵심 경쟁력",
-    "strategy_comparison": "5. 핵심 전략 비교 분석",
-    "swot": "5.3 SWOT 분석",
-    "implications": "6. 종합 시사점",
-    "references": "7. REFERENCE",
+    "summary": "I. EXECUTIVE SUMMARY",
+    "market_background": "II. 시장 배경",
+    "lges_strategy": "III. LG에너지솔루션의 포트폴리오 다각화 전략과 핵심 경쟁력",
+    "catl_strategy": "IV. CATL의 포트폴리오 다각화 전략과 핵심 경쟁력",
+    "strategy_comparison": "V. 핵심 전략 비교 분석",
+    "swot": "V.III SWOT 분석",
+    "implications": "VI. 종합 시사점",
+    "references": "VII. REFERENCE",
 }
+
+HEADING_NUMBER_PATTERN = re.compile(r"^(#{2,6})\s+(\d+(?:\.\d+)*)(\.)?\s+(.*)$")
 
 
 class WriterOutput(BaseModel):
@@ -266,7 +269,7 @@ def _build_section(
     existing = state["section_drafts"][section_id]
     return {
         **existing,
-        "content": content,
+        "content": _romanize_markdown_heading_numbers(content),
         "evidence_ids": _dedupe_ids(evidence_ids),
         "citations": list(citations or []),
         "status": "drafted",
@@ -281,10 +284,11 @@ def _build_writer_context(
     return "\n\n".join(
         [
             "다음 근거만 사용해 사람이 읽을 수 있는 한국어 전략 분석 보고서를 작성하라.",
-            f"- SUMMARY는 EXECUTIVE SUMMARY이며 {SUMMARY_MAX_CHARS}자를 넘기지 않는다.",
-            "- 2장은 writer가 스스로 판단한 `### 2.x 제목` 소제목 2~4개로 구성한다.",
-            "- 3장과 4장은 각각 LGES/CATL 전략을 실제 보고서 문체로 충분히 풀어 쓰고, 필요하면 `### 3.x`, `### 4.x` 소제목을 자율적으로 추가한다.",
-            "- 6장은 종합 시사점을 작성하고, 필요하면 `### 6.x` 소제목을 자율적으로 추가한다.",
+            f"- EXECUTIVE SUMMARY는 {SUMMARY_MAX_CHARS}자를 넘기지 않는다.",
+            "- 최종 보고서의 heading 번호는 로마자 표기(`I.`, `II.`, `V.I`, `V.II`, `V.III`)를 따른다.",
+            "- 2장은 writer가 스스로 판단한 소제목 2~4개로 구성하고, 소제목은 `### II.I 제목` 형식을 따른다.",
+            "- 3장과 4장은 각각 LGES/CATL 전략을 실제 보고서 문체로 충분히 풀어 쓰고, 필요하면 `### III.I`, `### IV.I` 형식의 소제목을 자율적으로 추가한다.",
+            "- 6장은 종합 시사점을 작성하고, 필요하면 `### VI.I` 형식의 소제목을 자율적으로 추가한다.",
             "- 각 장은 근거가 충분한 경우 얇은 요약문이 아니라 여러 문단의 보고서 본문으로 작성한다.",
             "- 가능하면 실제 근거에 있는 정량 수치(예: %, GWh, 건수, 가격/수익성/성장률 관련 숫자)를 자연스럽게 반영한다.",
             "- 수치를 쓸 때는 반드시 제공된 정량 근거 블록이나 evidence packet에 실제로 나타난 숫자만 사용한다.",
@@ -297,13 +301,13 @@ def _build_writer_context(
             format_evidence_packet(
                 state,
                 section_evidence_map["market_background"],
-                limit=12,
+                limit=14,
             ),
             "[시장 배경 정량 근거]",
             format_quantitative_evidence_packet(
                 state,
                 section_evidence_map["market_background"],
-                limit=6,
+                limit=8,
             ),
             "[LGES 요약]",
             state["companies"]["LGES"]["synthesized_summary"] or "정보 부족",
@@ -311,19 +315,19 @@ def _build_writer_context(
             format_evidence_packet(
                 state,
                 section_evidence_map["lges_strategy"],
-                limit=14,
+                limit=18,
             ),
             "[LGES 정량 근거]",
             format_quantitative_evidence_packet(
                 state,
                 section_evidence_map["lges_strategy"],
-                limit=8,
+                limit=10,
             ),
             "[LGES counter evidence]",
             format_evidence_packet(
                 state,
                 state["companies"]["LGES"]["counter_evidence_ids"],
-                limit=5,
+                limit=6,
             ),
             "[CATL 요약]",
             state["companies"]["CATL"]["synthesized_summary"] or "정보 부족",
@@ -331,19 +335,19 @@ def _build_writer_context(
             format_evidence_packet(
                 state,
                 section_evidence_map["catl_strategy"],
-                limit=14,
+                limit=18,
             ),
             "[CATL 정량 근거]",
             format_quantitative_evidence_packet(
                 state,
                 section_evidence_map["catl_strategy"],
-                limit=8,
+                limit=10,
             ),
             "[CATL counter evidence]",
             format_evidence_packet(
                 state,
                 state["companies"]["CATL"]["counter_evidence_ids"],
-                limit=5,
+                limit=6,
             ),
             "[핵심 전략 비교 메모]",
             state["comparison_summary"] or "정보 부족",
@@ -353,7 +357,7 @@ def _build_writer_context(
             format_quantitative_evidence_packet(
                 state,
                 section_evidence_map["implications"],
-                limit=10,
+                limit=14,
             ),
             "[REFERENCE 후보]",
             _build_references_content(references),
@@ -759,15 +763,15 @@ def _build_fallback_summary_content(state: ReportState) -> str:
 
 
 def _build_fallback_market_background_content(state: ReportState) -> str:
-    market_evidence = format_evidence_packet(state, state["market"]["evidence_ids"], limit=8)
+    market_evidence = format_evidence_packet(state, state["market"]["evidence_ids"], limit=10)
     gaps = "; ".join(state["market"]["retrieval_gaps"]) or "none"
     return "\n".join(
         [
-            "### 2.1 전기차 캐즘과 HEV 피벗",
+            "### II.I 전기차 캐즘과 HEV 피벗",
             "최근 수집된 기사에서는 EV 수요 둔화와 함께 HEV·ESS 등 대체 수요처로 관심이 이동하는 흐름이 반복적으로 나타난다.",
-            "### 2.2 K-배터리 업계의 포트폴리오 다각화 배경",
+            "### II.II K-배터리 업계의 포트폴리오 다각화 배경",
             "국내 배터리 업계는 EV 단일 수요 의존을 낮추기 위해 ESS, 로봇, 신규 폼팩터, 북미 거점 확대 같은 다각화 전략을 병행하는 것으로 해석된다.",
-            "### 2.3 CATL의 원가/기술 전략 변화",
+            "### II.III CATL의 원가/기술 전략 변화",
             "CATL 관련 자료에서는 원가 경쟁력, 기술 고도화, 공급망 활용이 핵심 축으로 자주 언급된다.",
             "근거 메모:",
             market_evidence,
@@ -778,8 +782,8 @@ def _build_fallback_market_background_content(state: ReportState) -> str:
 
 def _build_fallback_company_section_content(state: ReportState, company: str) -> str:
     company_state = state["companies"][company]
-    evidence_block = format_evidence_packet(state, company_state["evidence_ids"], limit=10)
-    counter_block = format_evidence_packet(state, company_state["counter_evidence_ids"], limit=5)
+    evidence_block = format_evidence_packet(state, company_state["evidence_ids"], limit=14)
+    counter_block = format_evidence_packet(state, company_state["counter_evidence_ids"], limit=6)
     gaps = "; ".join(company_state["retrieval_gaps"]) or "none"
     return "\n".join(
         [
@@ -797,9 +801,9 @@ def _build_fallback_company_section_content(state: ReportState, company: str) ->
 def _build_fallback_strategy_comparison(state: ReportState) -> str:
     return "\n".join(
         [
-            "### 5.1 전략 방향 차이",
+            "### V.I 전략 방향 차이",
             "LGES와 CATL 모두 포트폴리오 다각화를 추진하고 있지만, 현재 자동 수집 근거만으로 보면 LGES는 신규 응용처와 지역 확장 대응이, CATL은 원가/기술 우위를 활용한 확장이 상대적으로 더 강조된다.",
-            "### 5.2 데이터 기반 비교표",
+            "### V.II 데이터 기반 비교표",
             "| 회사 | 확보 근거 수 | 반대 근거 수 | 남은 gap |",
             "| --- | ---: | ---: | --- |",
             (
@@ -845,6 +849,50 @@ def _dedupe_ids(values: list[str]) -> list[str]:
         deduped.append(value)
         seen.add(value)
     return deduped
+
+
+def _romanize_markdown_heading_numbers(content: str) -> str:
+    if not content.strip():
+        return content
+
+    normalized_lines: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        match = HEADING_NUMBER_PATTERN.match(stripped)
+        if not match:
+            normalized_lines.append(line)
+            continue
+
+        hashes, numeric_prefix, trailing_dot, title = match.groups()
+        roman_prefix = ".".join(_to_roman(int(part)) for part in numeric_prefix.split("."))
+        normalized_lines.append(f"{hashes} {roman_prefix}{trailing_dot or ''} {title}")
+
+    return "\n".join(normalized_lines)
+
+
+def _to_roman(value: int) -> str:
+    numerals = (
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    )
+    remainder = value
+    result: list[str] = []
+    for arabic, roman in numerals:
+        while remainder >= arabic:
+            result.append(roman)
+            remainder -= arabic
+    return "".join(result)
 
 
 def _clean_title_and_site(title: str) -> tuple[str, str | None]:
