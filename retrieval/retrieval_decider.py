@@ -86,10 +86,20 @@ def decide_retrieval_action(
             )
             action = _sanitize_action(output.action, stage=stage)
             if action is not None:
+                action, rationale_override = _enforce_decision_constraints(
+                    action=action,
+                    stage=stage,
+                    refinement_rounds=refinement_rounds,
+                    refinement_budget=refinement_budget,
+                )
                 return RetrievalDecision(
                     action=action,
                     decision_mode="llm",
-                    rationale=output.rationale.strip() or "LLM selected the next retrieval action.",
+                    rationale=(
+                        rationale_override
+                        or output.rationale.strip()
+                        or "LLM selected the next retrieval action."
+                    ),
                 )
         except Exception:
             pass
@@ -122,6 +132,22 @@ def _sanitize_action(raw_action: str, *, stage: DecisionStage) -> DecisionAction
     if normalized in ALLOWED_ACTIONS_BY_STAGE[stage]:
         return normalized  # type: ignore[return-value]
     return None
+
+
+def _enforce_decision_constraints(
+    *,
+    action: DecisionAction,
+    stage: DecisionStage,
+    refinement_rounds: int,
+    refinement_budget: int,
+) -> tuple[DecisionAction, str | None]:
+    if (
+        stage in {"post_merge", "risk_review"}
+        and action == "refine"
+        and refinement_rounds >= refinement_budget
+    ):
+        return "stop", "Refinement budget is exhausted."
+    return action, None
 
 
 def _build_fallback_decision(

@@ -201,7 +201,7 @@ def run_two_stage_retrieval(
     max_refinement_rounds: int | None = None,
     max_new_queries_per_bucket: int | None = None,
 ) -> RetrievalExecution:
-    """Run local retrieval with gap-driven query refinement before returning artifacts."""
+    """Run local retrieval with decider-controlled web expansion and refinement."""
     settings = load_settings()
     refinement_budget = (
         settings.retrieval_refinement_max_rounds
@@ -269,129 +269,92 @@ def run_two_stage_retrieval(
             local_assessment.sufficient,
             local_assessment.gaps,
         )
+        _append_judge_assessment_note(
+            decision_notes,
+            stage="post_local",
+            assessment=local_assessment,
+        )
 
         round_web_results: MergedRetrievalResults = {
             "positive_results": [],
             "risk_results": [],
         }
 
-        local_action = "stop"
-        if retrieval_judge is not None:
-            if local_assessment.sufficient:
-                decision_notes.append(
-                    "post_local:judge:stop:"
-                    + (
-                        local_assessment.judge_summary
-                        or "Judge marked local evidence sufficient."
-                    )
-                )
+        merged_query_policy = _merge_query_policy_with_follow_up_queries(
+            active_query_policy,
+            positive_queries=local_assessment.follow_up_positive_queries,
+            risk_queries=local_assessment.follow_up_risk_queries,
+        )
+        if merged_query_policy != active_query_policy:
+            logger.info(
+                "[%s] Judge suggested follow-up queries: positive=%s risk=%s",
+                company_scope,
+                merged_query_policy["positive_queries"],
+                merged_query_policy["risk_queries"],
+            )
+            decision_notes.append(
+                "post_local:judge_queries:"
+                f"positive={local_assessment.follow_up_positive_queries}:"
+                f"risk={local_assessment.follow_up_risk_queries}"
+            )
+            active_query_policy = merged_query_policy
+
+        local_decision = decide_retrieval_action(
+            stage="post_local",
+            company_scope=company_scope,
+            assessment=local_assessment,
+            observed_results=cumulative_local_results,
+            current_query_policy=active_query_policy,
+            query_history=query_history,
+            used_web_search=bool(
+                cumulative_web_results["positive_results"] or cumulative_web_results["risk_results"]
+            ),
+            refinement_rounds=refinement_rounds,
+            refinement_budget=refinement_budget,
+            settings=settings,
+        )
+        local_action = local_decision.action
+        decision_notes.append(
+            (
+                f"post_local:{local_decision.decision_mode}:"
+                f"{local_decision.action}:{local_decision.rationale}"
+            )
+        )
+        logger.info(
+            "[%s] Retrieval decision post_local: mode=%s, action=%s, rationale=%s",
+            company_scope,
+            local_decision.decision_mode,
+            local_decision.action,
+            local_decision.rationale,
+        )
+        if local_action == "search_web":
+            if not cumulative_local_results:
                 logger.info(
-                    "[%s] Retrieval judge marked local evidence sufficient. Web search skipped.",
+                    "[%s] Local RAG returned 0 hits. Falling back to web search.",
                     company_scope,
                 )
             else:
-                merged_query_policy = _merge_query_policy_with_follow_up_queries(
-                    active_query_policy,
-                    positive_queries=local_assessment.follow_up_positive_queries,
-                    risk_queries=local_assessment.follow_up_risk_queries,
-                )
-                if merged_query_policy != active_query_policy:
-                    logger.info(
-                        "[%s] Judge suggested fallback queries: positive=%s risk=%s",
-                        company_scope,
-                        merged_query_policy["positive_queries"],
-                        merged_query_policy["risk_queries"],
-                    )
-                    active_query_policy = merged_query_policy
-                    _record_query_history(query_history, used_queries, active_query_policy)
-
-                local_action = "search_web"
-                decision_notes.append(
-                    "post_local:judge:search_web:"
-                    + (
-                        local_assessment.judge_summary
-                        or "; ".join(local_assessment.gaps)
-                        or "Judge requested broader evidence."
-                    )
-                )
-                if not cumulative_local_results:
-                    logger.info(
-                        "[%s] Local RAG returned 0 hits. Falling back to web search.",
-                        company_scope,
-                    )
-                else:
-                    logger.info(
-                        "[%s] Local RAG was insufficient. Falling back to web search.",
-                        company_scope,
-                    )
-                round_web_results = _run_web_search_with_retries(
-                    web_search_client=web_search_client,
-                    positive_queries=active_query_policy.get("positive_queries", []),
-                    risk_queries=active_query_policy.get("risk_queries", []),
-                    max_results_per_query=max_results_per_query,
-                    max_retries=web_search_max_retries,
-                )
                 logger.info(
-                    "[%s] Web search hits: positive=%d, risk=%d",
+                    "[%s] Local-first policy escalated to web search.",
                     company_scope,
-                    len(round_web_results["positive_results"]),
-                    len(round_web_results["risk_results"]),
                 )
-        else:
-            local_decision = decide_retrieval_action(
-                stage="post_local",
-                company_scope=company_scope,
-                assessment=local_assessment,
-                observed_results=cumulative_local_results,
-                current_query_policy=active_query_policy,
-                query_history=query_history,
-                used_web_search=bool(
-                    cumulative_web_results["positive_results"] or cumulative_web_results["risk_results"]
-                ),
-                refinement_rounds=refinement_rounds,
-                refinement_budget=refinement_budget,
-                settings=settings,
-            )
-            local_action = local_decision.action
-            decision_notes.append(
-                (
-                    f"post_local:{local_decision.decision_mode}:"
-                    f"{local_decision.action}:{local_decision.rationale}"
-                )
+            # Judge-suggested follow-up queries should count as history only if we actually execute them.
+            _record_query_history(query_history, used_queries, active_query_policy)
+            round_web_results = _run_web_search_with_retries(
+                web_search_client=web_search_client,
+                positive_queries=active_query_policy.get("positive_queries", []),
+                risk_queries=active_query_policy.get("risk_queries", []),
+                max_results_per_query=max_results_per_query,
+                max_retries=web_search_max_retries,
             )
             logger.info(
-                "[%s] Retrieval decision post_local: mode=%s, action=%s, rationale=%s",
+                "[%s] Web search hits: positive=%d, risk=%d",
                 company_scope,
-                local_decision.decision_mode,
-                local_decision.action,
-                local_decision.rationale,
+                len(round_web_results["positive_results"]),
+                len(round_web_results["risk_results"]),
             )
-            if local_action == "search_web":
-                if not cumulative_local_results:
-                    logger.info(
-                        "[%s] Local RAG returned 0 hits. Falling back to web search.",
-                        company_scope,
-                    )
-                else:
-                    logger.info(
-                        "[%s] Local-first policy escalated to web search.",
-                        company_scope,
-                    )
-                round_web_results = _run_web_search_with_retries(
-                    web_search_client=web_search_client,
-                    positive_queries=active_query_policy.get("positive_queries", []),
-                    risk_queries=active_query_policy.get("risk_queries", []),
-                    max_results_per_query=max_results_per_query,
-                    max_retries=web_search_max_retries,
-                )
-                logger.info(
-                    "[%s] Web search hits: positive=%d, risk=%d",
-                    company_scope,
-                    len(round_web_results["positive_results"]),
-                    len(round_web_results["risk_results"]),
-                )
-            else:
-                logger.info("[%s] Web search skipped after local-first decision.", company_scope)
+        else:
+            logger.info("[%s] Web search skipped after local-first decision.", company_scope)
 
         cumulative_web_results = _merge_bucketed_results(
             cumulative_web_results,
@@ -408,55 +371,13 @@ def run_two_stage_retrieval(
             stage="final",
             retrieval_judge=retrieval_judge,
         )
-        if retrieval_judge is not None:
-            if final_assessment.sufficient:
-                if local_action == "search_web":
-                    decision_notes.append(
-                        "post_merge:judge:stop:"
-                        + (
-                            final_assessment.judge_summary
-                            or "Judge marked merged evidence sufficient."
-                        )
-                    )
-                break
-            if round_index >= refinement_budget:
-                decision_notes.append(
-                    "post_merge:fallback:stop:Refinement budget is exhausted after this round."
-                )
-                break
-            refinement_result = refine_query_policy(
-                company_scope=company_scope,
-                current_query_policy=active_query_policy,
-                assessment=final_assessment,
-                observed_results=merged_results["positive_results"] + merged_results["risk_results"],
-                used_queries=used_queries,
-                max_new_queries_per_bucket=refinement_query_limit,
-                settings=settings,
-            )
-            if not refinement_result.positive_queries and not refinement_result.risk_queries:
-                refinement_notes.append(refinement_result.rationale)
-                break
-
-            refinement_rounds += 1
-            refinement_notes.append(
-                (
-                    f"round_{refinement_rounds}:{refinement_result.refinement_mode}: "
-                    f"positive={refinement_result.positive_queries}, risk={refinement_result.risk_queries}"
-                )
-            )
-            active_query_policy = {
-                "positive_queries": refinement_result.positive_queries,
-                "risk_queries": refinement_result.risk_queries,
-            }
-            round_index += 1
-            continue
+        _append_judge_assessment_note(
+            decision_notes,
+            stage="post_merge",
+            assessment=final_assessment,
+        )
 
         if local_action != "search_web":
-            break
-        if round_index >= refinement_budget:
-            decision_notes.append(
-                "post_merge:fallback:stop:Refinement budget is exhausted after this round."
-            )
             break
         merge_decision = decide_retrieval_action(
             stage="post_merge",
@@ -1123,6 +1044,35 @@ def _format_rule_based_summary(assessment: RetrievalAssessment) -> str:
             f"- gaps: {gaps}",
         ]
     )
+
+
+def _append_judge_assessment_note(
+    decision_notes: list[str],
+    *,
+    stage: str,
+    assessment: RetrievalAssessment,
+) -> None:
+    if (
+        assessment.judge_summary is None
+        and not assessment.follow_up_positive_queries
+        and not assessment.follow_up_risk_queries
+    ):
+        return
+
+    details = [
+        assessment.judge_summary
+        or (
+            "Judge marked current evidence sufficient."
+            if assessment.sufficient
+            else "Judge flagged remaining coverage gaps."
+        )
+    ]
+    if assessment.follow_up_positive_queries:
+        details.append(f"positive_queries={assessment.follow_up_positive_queries}")
+    if assessment.follow_up_risk_queries:
+        details.append(f"risk_queries={assessment.follow_up_risk_queries}")
+
+    decision_notes.append(f"{stage}:judge_assessment:{' | '.join(details)}")
 
 
 def _merge_query_policy_with_follow_up_queries(

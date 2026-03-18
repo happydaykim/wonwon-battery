@@ -261,19 +261,41 @@ class RetrievalPipelineTests(unittest.TestCase):
 
         web_search = StubWebSearch()
         judge = StubJudge()
-        execution = run_two_stage_retrieval(
-            rag_retriever=StubRetriever(),
-            web_search_client=web_search,
-            article_fetcher=None,
-            retrieval_judge=judge,
-            query_policy=build_balanced_query_policy("LGES"),
-            company_scope="LGES",
-            max_results_per_query=2,
-            article_fetch_max_documents=0,
-        )
+        with patch(
+            "retrieval.pipeline.decide_retrieval_action",
+            side_effect=[
+                SimpleNamespace(
+                    action="search_web",
+                    decision_mode="test",
+                    rationale="Judge gaps are meaningful enough to expand on web.",
+                ),
+                SimpleNamespace(
+                    action="stop",
+                    decision_mode="test",
+                    rationale="Merged coverage is sufficient after web expansion.",
+                ),
+            ],
+        ) as decider_mock:
+            execution = run_two_stage_retrieval(
+                rag_retriever=StubRetriever(),
+                web_search_client=web_search,
+                article_fetcher=None,
+                retrieval_judge=judge,
+                query_policy=build_balanced_query_policy("LGES"),
+                company_scope="LGES",
+                max_results_per_query=2,
+                article_fetch_max_documents=0,
+            )
 
         self.assertTrue(execution.used_web_search)
         self.assertEqual([("LGES", "local"), ("LGES", "final")], judge.calls)
+        self.assertEqual(2, decider_mock.call_count)
+        first_call = decider_mock.call_args_list[0].kwargs
+        self.assertEqual("post_local", first_call["stage"])
+        self.assertIn("LG에너지솔루션 ESS 수주 확대", first_call["current_query_policy"]["positive_queries"])
+        self.assertIn("LG에너지솔루션 북미 수익성 리스크", first_call["current_query_policy"]["risk_queries"])
+        second_call = decider_mock.call_args_list[1].kwargs
+        self.assertEqual("post_merge", second_call["stage"])
         self.assertEqual(1, len(web_search.calls))
         positive_queries, risk_queries = web_search.calls[0]
         self.assertIn("LG에너지솔루션 포트폴리오 다각화", positive_queries)
@@ -327,20 +349,100 @@ class RetrievalPipelineTests(unittest.TestCase):
 
                 return Decision()
 
-        execution = run_two_stage_retrieval(
-            rag_retriever=StubRetriever(),
-            web_search_client=StubWebSearch(),
-            article_fetcher=None,
-            retrieval_judge=StubJudge(),
-            query_policy=build_balanced_query_policy("LGES"),
-            company_scope="LGES",
-            max_results_per_query=2,
-            article_fetch_max_documents=0,
-        )
+        with patch(
+            "retrieval.pipeline.decide_retrieval_action",
+            return_value=SimpleNamespace(
+                action="stop",
+                decision_mode="test",
+                rationale="Local evidence is already sufficient.",
+            ),
+        ) as decider_mock:
+            execution = run_two_stage_retrieval(
+                rag_retriever=StubRetriever(),
+                web_search_client=StubWebSearch(),
+                article_fetcher=None,
+                retrieval_judge=StubJudge(),
+                query_policy=build_balanced_query_policy("LGES"),
+                company_scope="LGES",
+                max_results_per_query=2,
+                article_fetch_max_documents=0,
+            )
 
         self.assertFalse(execution.used_web_search)
         self.assertTrue(execution.local_assessment.sufficient)
         self.assertTrue(execution.final_assessment.sufficient)
+        self.assertEqual(1, decider_mock.call_count)
+
+    def test_judge_cannot_force_web_when_decider_stops_after_local(self) -> None:
+        class StubRetriever:
+            def retrieve(
+                self,
+                query: str,
+                *,
+                company_scope: str | None = None,
+                top_k: int = 5,
+            ) -> list[dict[str, object]]:
+                del company_scope, top_k
+                return [
+                    {
+                        "title": f"local-{query}",
+                        "source": "LocalSource",
+                        "source_name": "LocalSource",
+                        "stance": "positive",
+                        "topic_tags": ["strategy"],
+                        "link": f"https://example.com/{query}",
+                    }
+                ]
+
+        class StubWebSearch:
+            def search(self, **kwargs):
+                raise AssertionError("web search should not run when decider stops after local review")
+
+        class StubJudge:
+            def judge(
+                self,
+                *,
+                results: list[dict[str, object]],
+                company_scope: str,
+                query_policy: dict[str, list[str]],
+                stage: str,
+                rule_based_summary: str,
+            ):
+                del results, company_scope, query_policy, stage, rule_based_summary
+
+                class Decision:
+                    sufficient = False
+                    gaps = ["Need broader LGES evidence."]
+                    positive_queries = ["LG에너지솔루션 ESS 수주 확대"]
+                    risk_queries = ["LG에너지솔루션 북미 수익성 리스크"]
+                    reasoning_summary = "judge recommends broader web evidence"
+
+                return Decision()
+
+        with patch(
+            "retrieval.pipeline.decide_retrieval_action",
+            return_value=SimpleNamespace(
+                action="stop",
+                decision_mode="test",
+                rationale="Additional search is not worth the cost for this run.",
+            ),
+        ) as decider_mock:
+            execution = run_two_stage_retrieval(
+                rag_retriever=StubRetriever(),
+                web_search_client=StubWebSearch(),
+                article_fetcher=None,
+                retrieval_judge=StubJudge(),
+                query_policy=build_balanced_query_policy("LGES"),
+                company_scope="LGES",
+                max_results_per_query=2,
+                article_fetch_max_documents=0,
+            )
+
+        self.assertFalse(execution.used_web_search)
+        self.assertEqual(1, decider_mock.call_count)
+        self.assertFalse(execution.final_assessment.sufficient)
+        self.assertNotIn("LG에너지솔루션 ESS 수주 확대", execution.query_history)
+        self.assertNotIn("LG에너지솔루션 북미 수익성 리스크", execution.query_history)
 
     def test_collect_local_results_flattens_metadata_for_evaluation(self) -> None:
         class StubRetriever:
