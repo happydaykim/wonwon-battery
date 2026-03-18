@@ -59,14 +59,23 @@ Python 3.11, uv, OpenAI API, GitHub, Qwen Embedding, VL
 
 ```latex
 
-├── data/                  # PDF 문서, 메타데이터, 벡터 저장소
-├── ingestion/             # PDF 로딩, 청킹, 인제스트 파이프라인
-├── retrieval/             # 로컬 RAG, 웹 검색, 검색 정책
-├── agents/                # Agent 모듈
-├── prompts/               # 프롬프트 템플릿
-├── outputs/               # 평가 결과 및 보고서 저장
-├── graph/                 # LangGraph 라우팅 및 빌더
-├── app.py                 # 실행 스크립트
+├── .env.example            # 환경 변수 템플릿
+├── agents/                 # Multi-agent 모듈
+├── app.py                  # 실행 스크립트
+├── assets/                 # README 이미지/샘플 PDF 등
+├── config/                 # 설정값 및 상수
+├── data/                   # PDF 문서, 메타데이터, 벡터 저장소
+├── graph/                  # LangGraph 라우팅 및 빌더
+├── ingestion/              # PDF 로딩, 청킹, 인제스트 파이프라인
+├── outputs/                # 런타임 생성 결과물 (gitignore)
+├── prompts/                # 프롬프트 템플릿
+├── pyproject.toml          # 프로젝트 의존성/도구 설정
+├── requirements.txt        # 의존성 목록
+├── retrieval/              # 로컬 RAG, 웹 검색, 검색 정책
+├── schemas/                # 상태/데이터 스키마
+├── tests/                  # 단위 테스트
+├── utils/                  # 공통 유틸
+├── uv.lock                # uv lock 파일
 └── README.md
 ```
 
