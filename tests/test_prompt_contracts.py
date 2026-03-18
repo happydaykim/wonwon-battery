@@ -16,13 +16,9 @@ BANNED_PLACEHOLDER_PHRASES = (
 PROMPT_FILES = (
     "planner.md",
     "supervisor.md",
-    "market.md",
-    "lges.md",
-    "catl.md",
-    "skeptic.md",
+    "retrieval_decider.md",
     "compare_swot.md",
     "writer.md",
-    "validator.md",
     "query_refiner.md",
 )
 
@@ -56,6 +52,12 @@ class PromptContractTests(unittest.TestCase):
         self.assertIn("정보 부족/추가 검증 필요", prompt_text)
         self.assertIn("새로 만들지 않는다", prompt_text)
         self.assertIn("counter-evidence", prompt_text)
+
+    def test_retrieval_decider_prompt_requires_local_first_policy(self) -> None:
+        prompt_text = load_prompt("retrieval_decider.md")
+        self.assertIn("local-first", prompt_text)
+        self.assertIn("search_web", prompt_text)
+        self.assertIn("refine", prompt_text)
 
     def test_report_model_default_is_gpt4o(self) -> None:
         settings = load_settings()
