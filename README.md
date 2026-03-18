@@ -16,6 +16,8 @@
 - `StateGraph`, `START`, `END`, `TypedDict` 기반 상태 설계
 - Planner, Supervisor, Market, LGES, CATL, Skeptic, Compare/SWOT, Writer, Validator 노드 분리
 - `local RAG -> balanced web search -> skeptic re-check` 정책용 인터페이스 skeleton
+- `parallel_retrieval` 이후 retrieval sufficiency 기반 supervisor 동적 분기
+- retryable / non-retryable validation issue와 안전 종료 사유 기록
 - Prompt 파일 분리
 - `MemorySaver` 기반 그래프 컴파일 지점 제공
 - `.env.example`, `requirements.txt`, 기본 디렉터리 구조 포함
@@ -45,13 +47,13 @@
 
 기본 흐름은 아래와 같습니다.
 
-`Plan -> Retrieve -> Analyze -> Compare -> Write -> Validate -> Reflect -> Finalize`
+`Plan -> Retrieve -> (Sufficiency Branch) -> Skeptic? -> Compare -> Write -> Validate -> Finalize`
 
 retrieval 정책은 아래 순서를 따릅니다.
 
 `1차 local RAG -> 2차 balanced web search -> 3차 skeptic re-check`
 
-현재는 skeleton 상태이므로 retrieval, 분석, 작성 로직은 모두 TODO/stub 입니다.
+현재는 deterministic scaffold 중심이지만, retrieval sufficiency / skeptic 분기 / safe termination 로직은 실제 상태 전이로 연결되어 있습니다.
 
 ## Directory Structure
 

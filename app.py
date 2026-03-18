@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
@@ -90,6 +92,9 @@ def _build_default_market_state() -> TopicResearchState:
         "document_ids": [],
         "evidence_ids": [],
         "synthesized_summary": None,
+        "retrieval_sufficient": False,
+        "retrieval_gaps": [],
+        "used_web_search": False,
     }
 
 
@@ -102,6 +107,11 @@ def _build_default_company_state(
         "evidence_ids": [],
         "counter_evidence_ids": [],
         "synthesized_summary": None,
+        "retrieval_sufficient": False,
+        "retrieval_gaps": [],
+        "used_web_search": False,
+        "skeptic_review_required": False,
+        "skeptic_review_completed": False,
     }
 
 
@@ -127,6 +137,7 @@ def build_initial_state(
             "current_phase": "plan",
             "revision_count": 0,
             "max_revisions": resolved.report_max_revisions,
+            "termination_reason": None,
         },
         "documents": {},
         "evidence": {},
@@ -145,6 +156,24 @@ def build_initial_state(
         "validation_issues": [],
         "final_report": None,
     }
+
+
+def _write_final_report_markdown(
+    result: ReportState,
+    *,
+    settings: Settings,
+    thread_id: str,
+) -> Path | None:
+    """Persist the final report as a Markdown file when available."""
+    final_report = result.get("final_report")
+    if not final_report:
+        return None
+
+    settings.outputs_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = settings.outputs_dir / f"{thread_id}_{timestamp}.md"
+    report_path.write_text(final_report.rstrip() + "\n", encoding="utf-8")
+    return report_path
 
 
 def main() -> None:
@@ -168,21 +197,32 @@ def main() -> None:
         print(f"[placeholder] Initial state ready for query: {initial_state['user_query']}")
         return
 
+    thread_id = f"battery-strategy-{uuid4().hex[:8]}"
     result = graph.invoke(
         initial_state,
         config={
             "recursion_limit": 30,
-            "configurable": {"thread_id": f"battery-strategy-{uuid4().hex[:8]}"},
+            "configurable": {"thread_id": thread_id},
         },
+    )
+    report_path = _write_final_report_markdown(
+        result,
+        settings=settings,
+        thread_id=thread_id,
     )
 
     print("Graph compiled successfully.")
     print(f"Initial phase: {initial_state['runtime']['current_phase']}")
     print(f"Final phase: {result['runtime']['current_phase']}")
     print(f"Revision count: {result['runtime']['revision_count']}")
+    print(f"Termination reason: {result['runtime']['termination_reason']}")
     print(f"Remaining plan steps: {len(result['plan'])}")
     print(f"Validation issues: {len(result['validation_issues'])}")
     print(f"Messages collected: {len(result['messages'])}")
+    if report_path is not None:
+        print(f"Markdown report saved to: {report_path}")
+    else:
+        print("Markdown report was not saved because final_report is empty.")
     planner_message = next(
         (
             message["content"]

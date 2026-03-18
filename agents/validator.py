@@ -11,6 +11,33 @@ VALIDATOR_BLUEPRINT = create_agent_blueprint(
     prompt_name="validator.md",
 )
 
+SUMMARY_MAX_CHARS = 900
+SUMMARY_MIN_CHARS = 150
+FINAL_REPORT_REQUIRED_HEADINGS = (
+    "## 1. SUMMARY",
+    "## 2. 시장 배경",
+    "## 3. LG에너지솔루션의 포트폴리오 다각화 전략과 핵심 경쟁력",
+    "## 4. CATL의 포트폴리오 다각화 전략과 핵심 경쟁력",
+    "## 5. 핵심 전략 비교 분석",
+    "## 5.3 SWOT 분석",
+    "## 6. 종합 시사점",
+    "## 7. REFERENCE",
+)
+MARKET_REQUIRED_SUBHEADINGS = (
+    "### 2.1 전기차 캐즘과 HEV 피벗",
+    "### 2.2 K-배터리 업계의 포트폴리오 다각화 배경",
+    "### 2.3 CATL의 원가/기술 전략 변화",
+)
+COMPARISON_REQUIRED_SUBHEADINGS = (
+    "### 5.1 전략 방향 차이",
+    "### 5.2 데이터 기반 비교표",
+)
+PLACEHOLDER_PHRASES = (
+    "TODO",
+    "추가 정리가 필요하다",
+    "비교 요약이 아직 생성되지 않아",
+)
+
 REQUIRED_SECTION_IDS = (
     "summary",
     "market_background",
@@ -37,6 +64,7 @@ def _build_validation_issues(state: ReportState) -> list[ValidationIssue]:
                     "message": "Required section draft is missing from section_drafts.",
                     "related_evidence_ids": [],
                     "suggested_action": "Add the section scaffold before report generation.",
+                    "retryable": True,
                 }
             )
             continue
@@ -50,6 +78,7 @@ def _build_validation_issues(state: ReportState) -> list[ValidationIssue]:
                     "message": "Required section is not drafted yet.",
                     "related_evidence_ids": section["evidence_ids"],
                     "suggested_action": "Generate or revise this section with evidence links.",
+                    "retryable": True,
                 }
             )
 
@@ -61,7 +90,8 @@ def _build_validation_issues(state: ReportState) -> list[ValidationIssue]:
                 "severity": "error",
                 "message": "final_report is empty.",
                 "related_evidence_ids": [],
-                "suggested_action": "Compile approved section drafts into the final report.",
+                "suggested_action": "Compile drafted section outputs into the final report.",
+                "retryable": True,
             }
         )
 
@@ -71,32 +101,66 @@ def _build_validation_issues(state: ReportState) -> list[ValidationIssue]:
                 "issue_id": "missing_references",
                 "section_id": "references",
                 "severity": "warning",
-                "message": "No reference entries are registered yet.",
+                "message": (
+                    "Reference entries are missing even though source documents exist."
+                    if state["documents"]
+                    else "No verifiable references were collected from the current retrieval path."
+                ),
                 "related_evidence_ids": [],
-                "suggested_action": "Add citation entries once evidence extraction is implemented.",
+                "suggested_action": (
+                    "Assemble references from the existing documents."
+                    if state["documents"]
+                    else "Keep the limitation visible in the report and avoid unsupported claims."
+                ),
+                "retryable": bool(state["documents"]),
             }
         )
 
+    issues.extend(_build_retrieval_gap_issues(state))
+    issues.extend(_build_content_quality_issues(state))
     return issues
 
 
 def validator_node(state: ReportState) -> dict:
     """Validate draft completeness and control the revision loop."""
     issues = _build_validation_issues(state)
+    retryable_issues = [issue for issue in issues if issue["retryable"]]
+    non_retryable_issues = [issue for issue in issues if not issue["retryable"]]
     runtime = {**state["runtime"]}
     remaining_plan = (
         state["plan"][1:] if state["plan"] and state["plan"][0] == "validate" else state["plan"]
     )
 
-    if issues and has_revision_budget(state):
+    if not issues:
+        runtime["current_phase"] = "done"
+        runtime["termination_reason"] = "validated"
+        next_plan = remaining_plan
+        note = "Validation passed with no remaining issues."
+    elif retryable_issues and has_revision_budget(state):
         runtime["revision_count"] += 1
         runtime["current_phase"] = "write"
+        runtime["termination_reason"] = None
         next_plan = ["write", "validate", *remaining_plan]
-        note = "Validation found issues. Routing back to Writer for another revision attempt."
+        note = (
+            "Validation found retryable issues. "
+            f"Scheduling another writer pass ({len(retryable_issues)} retryable / "
+            f"{len(non_retryable_issues)} non-retryable)."
+        )
     else:
         runtime["current_phase"] = "done"
         next_plan = remaining_plan
-        note = "Validation finished. TODO: finalize success/failure reporting with real criteria."
+        if retryable_issues:
+            runtime["termination_reason"] = "max_revisions_reached"
+            note = (
+                "Validation stopped because retryable issues remain but the maximum "
+                "revision budget has been reached."
+            )
+        else:
+            runtime["termination_reason"] = "done_with_gaps"
+            note = (
+                "Validation finished with non-retryable information gaps. "
+                "The report is being finalized with explicit caveats."
+            )
 
     message = build_agent_message(VALIDATOR_BLUEPRINT.name, note)
     return {
@@ -105,3 +169,191 @@ def validator_node(state: ReportState) -> dict:
         "messages": state["messages"] + [message],
         "runtime": runtime,
     }
+
+
+def _build_retrieval_gap_issues(state: ReportState) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+
+    if not state["market"]["retrieval_sufficient"]:
+        issues.append(
+            {
+                "issue_id": "market_retrieval_gap",
+                "section_id": "market_background",
+                "severity": "warning",
+                "message": "Market background evidence is still insufficient.",
+                "related_evidence_ids": state["market"]["evidence_ids"],
+                "suggested_action": _build_gap_action(state["market"]["retrieval_gaps"]),
+                "retryable": False,
+            }
+        )
+
+    for company, section_id in (("LGES", "lges_strategy"), ("CATL", "catl_strategy")):
+        company_state = state["companies"][company]
+        if not company_state["retrieval_sufficient"]:
+            issues.append(
+                {
+                    "issue_id": f"{company.lower()}_retrieval_gap",
+                    "section_id": section_id,
+                    "severity": "warning",
+                    "message": f"{company} evidence remains insufficient after retrieval/skeptic flow.",
+                    "related_evidence_ids": company_state["evidence_ids"],
+                    "suggested_action": _build_gap_action(company_state["retrieval_gaps"]),
+                    "retryable": False,
+                }
+            )
+
+        if company_state["skeptic_review_required"] and not company_state["skeptic_review_completed"]:
+            issues.append(
+                {
+                    "issue_id": f"{company.lower()}_skeptic_pending",
+                    "section_id": section_id,
+                    "severity": "error",
+                    "message": f"{company} required skeptic review but it did not complete.",
+                    "related_evidence_ids": company_state["evidence_ids"],
+                    "suggested_action": "Run the skeptic step before finalizing the report.",
+                    "retryable": False,
+                }
+            )
+
+        if (
+            company_state["skeptic_review_required"]
+            and company_state["skeptic_review_completed"]
+            and not company_state["counter_evidence_ids"]
+        ):
+            issues.append(
+                {
+                    "issue_id": f"{company.lower()}_counter_evidence_gap",
+                    "section_id": "swot",
+                    "severity": "warning",
+                    "message": f"{company} skeptic review did not recover counter-evidence.",
+                    "related_evidence_ids": company_state["evidence_ids"],
+                    "suggested_action": "Keep weakness/threat language conservative and note the missing risk coverage.",
+                    "retryable": False,
+                }
+            )
+
+    return issues
+
+
+def _build_gap_action(gaps: list[str]) -> str:
+    if not gaps:
+        return "Preserve the limitation in the report and avoid unsupported claims."
+    return "Preserve the limitation in the report: " + "; ".join(gaps)
+
+
+def _build_content_quality_issues(state: ReportState) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    summary = state["section_drafts"]["summary"]["content"].strip()
+    if summary and len(summary) > SUMMARY_MAX_CHARS:
+        issues.append(
+            {
+                "issue_id": "summary_too_long",
+                "section_id": "summary",
+                "severity": "error",
+                "message": "SUMMARY exceeds the configured maximum length.",
+                "related_evidence_ids": state["section_drafts"]["summary"]["evidence_ids"],
+                "suggested_action": "Condense the executive summary to half-page length.",
+                "retryable": True,
+            }
+        )
+    if summary and len(summary) < SUMMARY_MIN_CHARS:
+        issues.append(
+            {
+                "issue_id": "summary_too_short",
+                "section_id": "summary",
+                "severity": "warning",
+                "message": "SUMMARY is too short to function as an executive summary.",
+                "related_evidence_ids": state["section_drafts"]["summary"]["evidence_ids"],
+                "suggested_action": "Expand the summary with key findings and caveats.",
+                "retryable": True,
+            }
+        )
+
+    market_content = state["section_drafts"]["market_background"]["content"]
+    missing_market_subheadings = [
+        heading for heading in MARKET_REQUIRED_SUBHEADINGS if heading not in market_content
+    ]
+    if missing_market_subheadings:
+        issues.append(
+            {
+                "issue_id": "market_subheadings_missing",
+                "section_id": "market_background",
+                "severity": "error",
+                "message": "Market background is missing one or more required subsections.",
+                "related_evidence_ids": state["section_drafts"]["market_background"]["evidence_ids"],
+                "suggested_action": "Include 2.1, 2.2, and 2.3 subheadings explicitly.",
+                "retryable": True,
+            }
+        )
+
+    comparison_content = state["section_drafts"]["strategy_comparison"]["content"]
+    if any(heading not in comparison_content for heading in COMPARISON_REQUIRED_SUBHEADINGS):
+        issues.append(
+            {
+                "issue_id": "comparison_subheadings_missing",
+                "section_id": "strategy_comparison",
+                "severity": "error",
+                "message": "Strategy comparison is missing required subsection headings.",
+                "related_evidence_ids": state["section_drafts"]["strategy_comparison"]["evidence_ids"],
+                "suggested_action": "Include 5.1 strategy difference and 5.2 data table subsections.",
+                "retryable": True,
+            }
+        )
+
+    if state["final_report"]:
+        missing_report_headings = [
+            heading for heading in FINAL_REPORT_REQUIRED_HEADINGS if heading not in state["final_report"]
+        ]
+        if missing_report_headings:
+            issues.append(
+                {
+                    "issue_id": "final_report_headings_missing",
+                    "section_id": "summary",
+                    "severity": "error",
+                    "message": "final_report is missing one or more required numbered headings.",
+                    "related_evidence_ids": [],
+                    "suggested_action": "Rebuild the final report with the exact required top-level headings.",
+                    "retryable": True,
+                }
+            )
+
+    reference_content = state["section_drafts"]["references"]["content"]
+    invalid_reference_lines = [
+        line
+        for line in reference_content.splitlines()
+        if line.strip() and line.strip() != "수집된 참고문헌이 없어 추가 검증 필요." and not _is_reference_line_valid(line)
+    ]
+    if invalid_reference_lines:
+        issues.append(
+            {
+                "issue_id": "reference_format_invalid",
+                "section_id": "references",
+                "severity": "error",
+                "message": "One or more reference lines do not match the expected Markdown citation style.",
+                "related_evidence_ids": [],
+                "suggested_action": "Format references as report/paper/webpage citations with italicized titles and URLs.",
+                "retryable": True,
+            }
+        )
+
+    for section_id in REQUIRED_SECTION_IDS:
+        content = state["section_drafts"][section_id]["content"]
+        if any(phrase in content for phrase in PLACEHOLDER_PHRASES):
+            issues.append(
+                {
+                    "issue_id": f"{section_id}_placeholder_language",
+                    "section_id": section_id,
+                    "severity": "warning",
+                    "message": "Section still contains placeholder language instead of finished report prose.",
+                    "related_evidence_ids": state["section_drafts"][section_id]["evidence_ids"],
+                    "suggested_action": "Rewrite the section as reader-facing report prose.",
+                    "retryable": True,
+                }
+            )
+
+    return issues
+
+
+def _is_reference_line_valid(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("- ") and "*" in stripped and "http" in stripped

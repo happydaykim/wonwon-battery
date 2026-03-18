@@ -36,6 +36,8 @@ def market_node(state: ReportState) -> dict:
         query_policy=query_policy,
         company_scope="MARKET",
         max_results_per_query=settings.google_news_max_results_per_query,
+        document_search_max_retries=settings.document_search_max_retries,
+        web_search_max_retries=settings.web_search_max_retries,
     )
     artifacts = build_retrieval_artifacts(
         merged_results=retrieval_execution.merged_results,
@@ -46,11 +48,14 @@ def market_node(state: ReportState) -> dict:
         local_results=retrieval_execution.local_results,
         merged_results=retrieval_execution.merged_results,
         used_web_search=retrieval_execution.used_web_search,
+        final_assessment=retrieval_execution.final_assessment,
     )
     logger.info(
-        "[MARKET] documents=%d, evidence=%d, preview_titles=%s",
+        "[MARKET] documents=%d, evidence=%d, final_sufficient=%s, gaps=%s, preview_titles=%s",
         len(artifacts.document_ids),
         len(artifacts.evidence_ids),
+        retrieval_execution.final_assessment.sufficient,
+        retrieval_execution.final_assessment.gaps,
         _preview_titles(retrieval_execution.merged_results),
     )
 
@@ -62,6 +67,9 @@ def market_node(state: ReportState) -> dict:
             "document_ids": artifacts.document_ids,
             "evidence_ids": artifacts.evidence_ids,
             "synthesized_summary": summary,
+            "retrieval_sufficient": retrieval_execution.final_assessment.sufficient,
+            "retrieval_gaps": retrieval_execution.final_assessment.gaps,
+            "used_web_search": retrieval_execution.used_web_search,
         },
     }
 
