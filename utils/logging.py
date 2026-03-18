@@ -7,7 +7,7 @@ from typing import Any
 
 try:
     from dotenv import load_dotenv as _load_dotenv
-except ImportError:  # pragma: no cover - optional during skeleton setup
+except ImportError:  # pragma: no cover - optional in lightweight environments
     def _load_dotenv(*args: Any, **kwargs: Any) -> bool:
         return False
 

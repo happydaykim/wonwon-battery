@@ -1,4 +1,4 @@
-"""Typed state definitions used across the skeleton project."""
+"""Typed state definitions used across the battery strategy workflow."""
 
 from schemas.state import (
     CompanyResearchState,

@@ -22,7 +22,7 @@ def parallel_retrieval_dispatch(_: ReportState) -> dict:
 
 
 def build_graph(settings: Settings | None = None) -> Any:
-    """Build and compile the Supervisor-based LangGraph skeleton."""
+    """Build and compile the Supervisor-based LangGraph workflow."""
     _ = settings or load_settings()
 
     try:

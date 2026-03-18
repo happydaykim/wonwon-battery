@@ -6,7 +6,7 @@ from pathlib import Path
 
 try:
     from dotenv import load_dotenv as _load_dotenv
-except ImportError:  # pragma: no cover - optional during skeleton setup
+except ImportError:  # pragma: no cover - optional in lightweight environments
     def _load_dotenv(*args: object, **kwargs: object) -> bool:
         return False
 
